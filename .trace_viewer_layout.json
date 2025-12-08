@@ -1,17 +1,4 @@
 {
-  "windows": [
-    {
-      "file": "target\\debug\\build\\clang-sys-71aa2661bc4de06c\\out\\common.rs",
-      "position": [
-        338.0,
-        135.0
-      ],
-      "size": [
-        720.0,
-        460.0
-      ],
-      "scroll": 280.0,
-      "scroll_x": 0.0
-    }
-  ]
+  "windows": [],
+  "sidebar_scroll": 0.0
 }

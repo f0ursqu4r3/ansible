@@ -6,40 +6,45 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+mod helpers;
+use helpers::{find_function_span, matches_view};
+mod sidebar;
+use sidebar::{SidebarAction, SidebarState};
 use syn::visit::Visit;
 use walkdir::WalkDir;
 
-const FONT_SIZE: f32 = 10.0;
-const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
-const TITLE_BAR_HEIGHT: f32 = 32.0;
-const SIDEBAR_WIDTH: f32 = 260.0;
-const CODE_X_OFFSET: f32 = 52.0;
-const BREADCRUMB_HEIGHT: f32 = 20.0;
-const LAYOUT_FILE: &str = ".trace_viewer_layout.json";
+pub const FONT_SIZE: f32 = 10.0;
+pub const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
+pub const TITLE_BAR_HEIGHT: f32 = 32.0;
+pub const SIDEBAR_WIDTH: f32 = 260.0;
+pub const CODE_X_OFFSET: f32 = 52.0;
+pub const BREADCRUMB_HEIGHT: f32 = 20.0;
+pub const LAYOUT_FILE: &str = ".trace_viewer_layout.json";
+pub const SIDEBAR_ROW_H: f32 = 22.0;
 
-const COLOR_BG: Color = Color::new(18, 18, 24, 255);
-const COLOR_SIDEBAR: Color = Color::new(28, 28, 36, 255);
-const COLOR_WINDOW_TOP: Color = Color::new(40, 42, 58, 240);
-const COLOR_WINDOW: Color = Color::new(30, 30, 40, 220);
-const COLOR_TITLE: Color = Color::new(60, 64, 90, 255);
-const COLOR_TEXT: Color = Color::new(220, 220, 230, 255);
-const COLOR_COMMENT: Color = Color::new(120, 130, 150, 255);
-const COLOR_STRING: Color = Color::new(180, 200, 140, 255);
-const COLOR_KEYWORD: Color = Color::new(255, 170, 120, 255);
-const COLOR_CALL: Color = Color::new(120, 200, 255, 255);
-const COLOR_LINE_NUM: Color = Color::new(90, 100, 130, 255);
-const COLOR_CLOSE: Color = Color::new(230, 120, 120, 255);
-const COLOR_PROJECT: Color = Color::new(200, 210, 255, 255);
-const COLOR_SIDEBAR_TEXT: Color = Color::new(210, 210, 220, 255);
-const COLOR_SIDEBAR_HIGHLIGHT: Color = Color::new(70, 90, 140, 140);
-const COLOR_SEARCH_BG: Color = Color::new(40, 44, 60, 255);
-const COLOR_BREADCRUMB: Color = Color::new(140, 150, 170, 255);
+pub const COLOR_BG: Color = Color::new(18, 18, 24, 255);
+pub const COLOR_SIDEBAR: Color = Color::new(28, 28, 36, 255);
+pub const COLOR_WINDOW_TOP: Color = Color::new(40, 42, 58, 240);
+pub const COLOR_WINDOW: Color = Color::new(30, 30, 40, 220);
+pub const COLOR_TITLE: Color = Color::new(60, 64, 90, 255);
+pub const COLOR_TEXT: Color = Color::new(220, 220, 230, 255);
+pub const COLOR_COMMENT: Color = Color::new(120, 130, 150, 255);
+pub const COLOR_STRING: Color = Color::new(180, 200, 140, 255);
+pub const COLOR_KEYWORD: Color = Color::new(255, 170, 120, 255);
+pub const COLOR_CALL: Color = Color::new(120, 200, 255, 255);
+pub const COLOR_LINE_NUM: Color = Color::new(90, 100, 130, 255);
+pub const COLOR_CLOSE: Color = Color::new(230, 120, 120, 255);
+pub const COLOR_PROJECT: Color = Color::new(200, 210, 255, 255);
+pub const COLOR_SIDEBAR_TEXT: Color = Color::new(210, 210, 220, 255);
+pub const COLOR_SIDEBAR_HIGHLIGHT: Color = Color::new(70, 90, 140, 140);
+pub const COLOR_SEARCH_BG: Color = Color::new(40, 44, 60, 255);
+pub const COLOR_BREADCRUMB: Color = Color::new(140, 150, 170, 255);
 const KEYWORDS: [&str; 21] = [
     "if", "else", "for", "while", "loop", "match", "fn", "pub", "impl", "struct", "enum", "use",
     "let", "in", "where", "return", "async", "mod", "trait", "const", "static",
 ];
 
-enum AppFont {
+pub enum AppFont {
     Owned(Font),
     Default(WeakFont),
 }
@@ -179,12 +184,20 @@ struct CodeWindow {
     id: usize,
     file: PathBuf,
     title: String,
+    focus_line: Option<usize>,
+    view_kind: CodeViewKind,
     position: Vector2,
     size: Vector2,
     scroll: f32,
     scroll_x: f32,
     is_dragging: bool,
     drag_offset: Vector2,
+}
+
+#[derive(Clone, Debug)]
+enum CodeViewKind {
+    FullFile,
+    SingleFn { start: usize, end: usize },
 }
 
 impl CodeWindow {
@@ -210,6 +223,7 @@ impl CodeWindow {
 #[derive(Serialize, Deserialize)]
 struct SavedWindow {
     file: String,
+    view_kind: Option<SavedViewKind>,
     position: (f32, f32),
     size: (f32, f32),
     scroll: f32,
@@ -220,6 +234,19 @@ struct SavedWindow {
 #[derive(Serialize, Deserialize)]
 struct SavedLayout {
     windows: Vec<SavedWindow>,
+    #[serde(default)]
+    sidebar_scroll: f32,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
+enum SavedViewKind {
+    FullFile,
+    SingleFn {
+        start: usize,
+        end: usize,
+        title: String,
+    },
 }
 
 enum WindowAction {
@@ -233,8 +260,7 @@ struct AppState {
     project: ProjectModel,
     windows: Vec<CodeWindow>,
     next_window_id: usize,
-    search_query: String,
-    search_focused: bool,
+    sidebar: SidebarState,
 }
 
 impl AppState {
@@ -248,20 +274,34 @@ impl AppState {
             return;
         };
         if let Ok(layout) = serde_json::from_str::<SavedLayout>(&text) {
+            self.sidebar.scroll = layout.sidebar_scroll;
             for saved in layout.windows {
                 let file = self.project.root.join(&saved.file);
                 if !self.project.parsed.contains_key(&file) {
                     continue;
                 }
-                let title = file
+                let mut title = file
                     .file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or("file")
                     .to_string();
+                let view_kind = match saved.view_kind {
+                    Some(SavedViewKind::SingleFn {
+                        start,
+                        end,
+                        title: t,
+                    }) => {
+                        title = t;
+                        CodeViewKind::SingleFn { start, end }
+                    }
+                    _ => CodeViewKind::FullFile,
+                };
                 let mut win = CodeWindow {
                     id: self.next_window_id,
                     file,
                     title,
+                    focus_line: None,
+                    view_kind,
                     position: Vector2::new(saved.position.0, saved.position.1),
                     size: Vector2::new(saved.size.0, saved.size.1),
                     scroll: saved.scroll,
@@ -287,13 +327,24 @@ impl AppState {
             .iter()
             .map(|w| SavedWindow {
                 file: self.project.display_name(&w.file),
+                view_kind: match w.view_kind {
+                    CodeViewKind::FullFile => None,
+                    CodeViewKind::SingleFn { start, end } => Some(SavedViewKind::SingleFn {
+                        start,
+                        end,
+                        title: w.title.clone(),
+                    }),
+                },
                 position: (w.position.x, w.position.y),
                 size: (w.size.x, w.size.y),
                 scroll: w.scroll,
                 scroll_x: w.scroll_x,
             })
             .collect();
-        let layout = SavedLayout { windows };
+        let layout = SavedLayout {
+            windows,
+            sidebar_scroll: self.sidebar.scroll,
+        };
         let path = self.layout_path();
         let text = serde_json::to_string_pretty(&layout)?;
         fs::write(path, text)?;
@@ -305,8 +356,7 @@ impl AppState {
             project,
             windows: Vec::new(),
             next_window_id: 1,
-            search_query: String::new(),
-            search_focused: false,
+            sidebar: SidebarState::new(),
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -322,6 +372,7 @@ impl AppState {
             let mut win = self.windows.remove(idx);
             if let Some(line) = jump_to {
                 win.scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
+                win.focus_line = Some(line);
             }
             if let Some(max) = self.parsed_height(&win.file) {
                 win.scroll = win.scroll.min(max);
@@ -349,6 +400,8 @@ impl AppState {
                 .and_then(|s| s.to_str())
                 .unwrap_or("file")
                 .to_string(),
+            focus_line: jump_to,
+            view_kind: CodeViewKind::FullFile,
             position: pos,
             size: Vector2::new(720.0, 460.0),
             scroll,
@@ -394,15 +447,6 @@ impl AppState {
         self.windows.push(w);
     }
 
-    fn search_rect(&self) -> Rectangle {
-        Rectangle {
-            x: 12.0,
-            y: 40.0,
-            width: SIDEBAR_WIDTH - 24.0,
-            height: 26.0,
-        }
-    }
-
     fn handle_input(
         &mut self,
         font: &AppFont,
@@ -413,6 +457,7 @@ impl AppState {
         typed: String,
         backspace: bool,
         shift_down: bool,
+        sidebar_height: f32,
     ) {
         if !left_down {
             for w in &mut self.windows {
@@ -422,6 +467,12 @@ impl AppState {
 
         // Scroll when hovering over a code window content.
         if wheel.abs() > f32::EPSILON {
+            if self
+                .sidebar
+                .handle_wheel(mouse, wheel, &self.project, sidebar_height)
+            {
+                return;
+            }
             for idx in (0..self.windows.len()).rev() {
                 let content = self.windows[idx].content_rect();
                 if point_in_rect(mouse, content) {
@@ -466,7 +517,7 @@ impl AppState {
                             self.windows.pop();
                         }
                         WindowAction::OpenDefinition(def) => {
-                            self.open_file(def.file.clone(), Some(def.line));
+                            self.open_definition(def);
                         }
                         WindowAction::StartDrag(offset) => {
                             if let Some(win) = self.windows.last_mut() {
@@ -482,80 +533,35 @@ impl AppState {
             }
 
             if !handled {
-                handled = self.handle_sidebar_click(mouse);
+                if let Some(action) =
+                    self.sidebar
+                        .handle_click(mouse, &self.project, &self.project.defs)
+                {
+                    match action {
+                        SidebarAction::OpenFile { path, line } => {
+                            self.open_file(path, line);
+                            handled = true;
+                        }
+                        SidebarAction::None => {}
+                    }
+                }
             }
 
-            if !handled && point_in_rect(mouse, self.search_rect()) {
-                self.search_focused = true;
+            if !handled && point_in_rect(mouse, self.sidebar.search_rect()) {
+                self.sidebar.search_focused = true;
             } else if !handled {
-                self.search_focused = false;
+                self.sidebar.search_focused = false;
             }
         }
 
-        if self.search_focused {
+        if self.sidebar.search_focused {
             if backspace {
-                self.search_query.pop();
+                self.sidebar.search_query.pop();
             }
             if !typed.is_empty() {
-                self.search_query.push_str(&typed);
+                self.sidebar.search_query.push_str(&typed);
             }
         }
-    }
-
-    fn handle_sidebar_click(&mut self, mouse: Vector2) -> bool {
-        if mouse.x > SIDEBAR_WIDTH {
-            return false;
-        }
-        let query = self.search_query.to_lowercase();
-        let search_rect = self.search_rect();
-        let mut y = search_rect.y + search_rect.height + 10.0;
-        let files: Vec<_> = if query.is_empty() {
-            self.project.files.iter().collect()
-        } else {
-            self.project
-                .files
-                .iter()
-                .filter(|p| self.project.display_name(p).to_lowercase().contains(&query))
-                .collect()
-        };
-        for path in files {
-            let rect = Rectangle {
-                x: 10.0,
-                y,
-                width: SIDEBAR_WIDTH - 20.0,
-                height: 22.0,
-            };
-            if point_in_rect(mouse, rect) {
-                self.open_file(path.clone(), None);
-                return true;
-            }
-            y += 24.0;
-        }
-
-        if !query.is_empty() {
-            y += 8.0 + 18.0; // spacing + "Matches" header
-            for (_, def) in self
-                .project
-                .defs
-                .iter()
-                .filter(|(name, _)| name.to_lowercase().contains(&query))
-                .take(15)
-            {
-                let rect = Rectangle {
-                    x: 10.0,
-                    y,
-                    width: SIDEBAR_WIDTH - 20.0,
-                    height: 20.0,
-                };
-                if point_in_rect(mouse, rect) {
-                    let target = def.first().unwrap();
-                    self.open_file(target.file.clone(), Some(target.line));
-                    return true;
-                }
-                y += 20.0;
-            }
-        }
-        false
     }
 
     fn handle_window_click(&mut self, font: &AppFont, idx: usize, mouse: Vector2) -> WindowAction {
@@ -660,158 +666,11 @@ impl AppState {
 
     fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
         d.clear_background(COLOR_BG);
-        self.draw_sidebar(d, font, mouse);
+        self.sidebar
+            .draw(d, font, mouse, &self.project, &self.project.defs);
         for idx in 0..self.windows.len() {
             let is_top = idx + 1 == self.windows.len();
             self.draw_window(d, font, idx, is_top);
-        }
-    }
-
-    fn draw_sidebar(&self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
-        d.draw_rectangle(
-            0,
-            0,
-            SIDEBAR_WIDTH as i32,
-            d.get_screen_height(),
-            COLOR_SIDEBAR,
-        );
-        font.draw_text_ex(
-            d,
-            "Project",
-            Vector2::new(12.0, 10.0),
-            FONT_SIZE + 2.0,
-            0.0,
-            COLOR_PROJECT,
-        );
-
-        let search_rect = self.search_rect();
-        d.draw_rectangle(
-            search_rect.x as i32,
-            search_rect.y as i32,
-            search_rect.width as i32,
-            search_rect.height as i32,
-            COLOR_SEARCH_BG,
-        );
-        if self.search_focused {
-            d.draw_rectangle_lines(
-                (search_rect.x - 1.0) as i32,
-                (search_rect.y - 1.0) as i32,
-                (search_rect.width + 2.0) as i32,
-                (search_rect.height + 2.0) as i32,
-                COLOR_PROJECT,
-            );
-        }
-        let search_text = if self.search_query.is_empty() {
-            "search..."
-        } else {
-            &self.search_query
-        };
-        let search_color = if self.search_query.is_empty() {
-            COLOR_LINE_NUM
-        } else {
-            COLOR_SIDEBAR_TEXT
-        };
-        font.draw_text_ex(
-            d,
-            search_text,
-            Vector2::new(search_rect.x + 6.0, search_rect.y + 4.0),
-            FONT_SIZE - 2.0,
-            0.0,
-            search_color,
-        );
-
-        let query = self.search_query.to_lowercase();
-        let mut y = search_rect.y + search_rect.height + 10.0;
-        let files: Vec<_> = if query.is_empty() {
-            self.project.files.iter().collect()
-        } else {
-            self.project
-                .files
-                .iter()
-                .filter(|p| self.project.display_name(p).to_lowercase().contains(&query))
-                .collect()
-        };
-
-        for path in files {
-            let display = self.project.display_name(path);
-            let rect = Rectangle {
-                x: 10.0,
-                y,
-                width: SIDEBAR_WIDTH - 20.0,
-                height: 22.0,
-            };
-            if point_in_rect(mouse, rect) {
-                d.draw_rectangle(
-                    rect.x as i32,
-                    rect.y as i32,
-                    rect.width as i32,
-                    rect.height as i32,
-                    COLOR_SIDEBAR_HIGHLIGHT,
-                );
-            }
-            font.draw_text_ex(
-                d,
-                &display,
-                Vector2::new(rect.x + 4.0, y),
-                FONT_SIZE - 2.0,
-                0.0,
-                COLOR_SIDEBAR_TEXT,
-            );
-            y += 24.0;
-        }
-
-        if !query.is_empty() {
-            y += 8.0;
-            font.draw_text_ex(
-                d,
-                "Matches",
-                Vector2::new(12.0, y),
-                FONT_SIZE - 2.0,
-                0.0,
-                COLOR_PROJECT,
-            );
-            y += 18.0;
-            for (def_name, def) in self
-                .project
-                .defs
-                .iter()
-                .filter(|(name, _)| name.to_lowercase().contains(&query))
-                .take(15)
-            {
-                let target = def.first().unwrap();
-                let rect = Rectangle {
-                    x: 10.0,
-                    y,
-                    width: SIDEBAR_WIDTH - 20.0,
-                    height: 20.0,
-                };
-                if point_in_rect(mouse, rect) {
-                    d.draw_rectangle(
-                        rect.x as i32,
-                        rect.y as i32,
-                        rect.width as i32,
-                        rect.height as i32,
-                        COLOR_SIDEBAR_HIGHLIGHT,
-                    );
-                }
-                let label = format!(
-                    "{} ({})",
-                    def_name,
-                    target
-                        .module_path
-                        .strip_prefix("crate::")
-                        .unwrap_or(&target.module_path)
-                );
-                font.draw_text_ex(
-                    d,
-                    &label,
-                    Vector2::new(rect.x + 4.0, y),
-                    FONT_SIZE - 4.0,
-                    0.0,
-                    COLOR_SIDEBAR_TEXT,
-                );
-                y += 20.0;
-            }
         }
     }
 
@@ -937,6 +796,92 @@ impl AppState {
     ) {
         let segments = colorize_line(line, calls);
         draw_segments(d, font, base_x, y, &segments);
+    }
+
+    fn open_definition(&mut self, def: DefinitionLocation) {
+        let title = def
+            .module_path
+            .split("::")
+            .last()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                def.file
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("fn")
+                    .to_string()
+            });
+
+        // Find function span lines to limit the view.
+        let view_kind = if let Some(pf) = self.project.parsed.get(&def.file) {
+            if let Some((start, end)) = find_function_span(pf, def.line) {
+                CodeViewKind::SingleFn { start, end }
+            } else {
+                CodeViewKind::FullFile
+            }
+        } else {
+            CodeViewKind::FullFile
+        };
+
+        self.open_file_with_view(def.file, Some(def.line), title, view_kind);
+    }
+
+    fn open_file_with_view(
+        &mut self,
+        path: PathBuf,
+        jump_to: Option<usize>,
+        title: String,
+        view_kind: CodeViewKind,
+    ) {
+        if let Some(idx) = self
+            .windows
+            .iter()
+            .position(|w| w.file == path && matches_view(&w.view_kind, &view_kind))
+        {
+            let mut win = self.windows.remove(idx);
+            if let Some(line) = jump_to {
+                win.scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
+                win.focus_line = Some(line);
+            }
+            if let Some(max) = self.parsed_height(&win.file) {
+                win.scroll = win.scroll.min(max);
+            }
+            if let Some(max_x) = self.max_scroll_x(&win) {
+                win.scroll_x = win.scroll_x.min(max_x);
+            }
+            self.windows.push(win);
+            return;
+        }
+
+        let pos = Vector2::new(
+            SIDEBAR_WIDTH + 24.0 + (self.windows.len() as f32 * 18.0),
+            40.0 + (self.windows.len() as f32 * 18.0),
+        );
+        let mut scroll = 0.0;
+        if let Some(line) = jump_to {
+            scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
+        }
+        let mut win = CodeWindow {
+            id: self.next_window_id,
+            file: path.clone(),
+            title,
+            focus_line: jump_to,
+            view_kind,
+            position: pos,
+            size: Vector2::new(720.0, 460.0),
+            scroll,
+            scroll_x: 0.0,
+            is_dragging: false,
+            drag_offset: Vector2 { x: 0.0, y: 0.0 },
+        };
+        if let Some(max) = self.parsed_height(&win.file) {
+            win.scroll = win.scroll.min(max);
+        }
+        if let Some(max_x) = self.max_scroll_x(&win) {
+            win.scroll_x = win.scroll_x.min(max_x);
+        }
+        self.next_window_id += 1;
+        self.windows.push(win);
     }
 }
 
@@ -1204,6 +1149,7 @@ fn main() -> Result<()> {
             typed,
             backspace,
             shift_down,
+            rl.get_screen_height() as f32,
         );
 
         let mut d = rl.begin_drawing(&thread);
