@@ -3,12 +3,13 @@ use proc_macro2::Span;
 use raylib::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 use walkdir::WalkDir;
 
-const FONT_SIZE: f32 = 18.0;
+const FONT_SIZE: f32 = 10.0;
 const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
 const TITLE_BAR_HEIGHT: f32 = 32.0;
 const SIDEBAR_WIDTH: f32 = 260.0;
@@ -37,7 +38,44 @@ const KEYWORDS: [&str; 21] = [
     "if", "else", "for", "while", "loop", "match", "fn", "pub", "impl", "struct", "enum", "use",
     "let", "in", "where", "return", "async", "mod", "trait", "const", "static",
 ];
-type AppFont = WeakFont;
+
+enum AppFont {
+    Owned(Font),
+    Default(WeakFont),
+}
+
+impl AppFont {
+    fn owned(font: Font) -> Self {
+        Self::Owned(font)
+    }
+
+    fn default_font(rl: &RaylibHandle) -> Self {
+        Self::Default(rl.get_font_default())
+    }
+
+    fn draw_text_ex(
+        &self,
+        d: &mut RaylibDrawHandle,
+        text: impl AsRef<str>,
+        pos: Vector2,
+        size: f32,
+        spacing: f32,
+        color: Color,
+    ) {
+        let t = text.as_ref();
+        match self {
+            AppFont::Owned(f) => d.draw_text_ex(f, t, pos, size, spacing, color),
+            AppFont::Default(f) => d.draw_text_ex(f, t, pos, size, spacing, color),
+        }
+    }
+
+    fn measure_width(&self, text: impl AsRef<str>, size: f32, spacing: f32) -> f32 {
+        match self {
+            AppFont::Owned(f) => f.measure_text(text.as_ref(), size, spacing).x,
+            AppFont::Default(f) => f.measure_text(text.as_ref(), size, spacing).x,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 struct FunctionDef {
@@ -291,7 +329,11 @@ impl AppState {
         let mut win = CodeWindow {
             id: self.next_window_id,
             file: path.clone(),
-            title: path.file_name().and_then(|s| s.to_str()).unwrap_or("file").to_string(),
+            title: path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file")
+                .to_string(),
             position: pos,
             size: Vector2::new(720.0, 460.0),
             scroll,
@@ -472,12 +514,7 @@ impl AppState {
         false
     }
 
-    fn handle_window_click(
-        &mut self,
-        font: &AppFont,
-        idx: usize,
-        mouse: Vector2,
-    ) -> WindowAction {
+    fn handle_window_click(&mut self, font: &AppFont, idx: usize, mouse: Vector2) -> WindowAction {
         let win = &self.windows[idx];
         let title_rect = win.title_rect();
         let close_rect = Rectangle {
@@ -587,9 +624,15 @@ impl AppState {
     }
 
     fn draw_sidebar(&self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
-        d.draw_rectangle(0, 0, SIDEBAR_WIDTH as i32, d.get_screen_height(), COLOR_SIDEBAR);
-        d.draw_text_ex(
-            font,
+        d.draw_rectangle(
+            0,
+            0,
+            SIDEBAR_WIDTH as i32,
+            d.get_screen_height(),
+            COLOR_SIDEBAR,
+        );
+        font.draw_text_ex(
+            d,
             "Project",
             Vector2::new(12.0, 10.0),
             FONT_SIZE + 2.0,
@@ -624,8 +667,8 @@ impl AppState {
         } else {
             COLOR_SIDEBAR_TEXT
         };
-        d.draw_text_ex(
-            font,
+        font.draw_text_ex(
+            d,
             search_text,
             Vector2::new(search_rect.x + 6.0, search_rect.y + 4.0),
             FONT_SIZE - 2.0,
@@ -662,8 +705,8 @@ impl AppState {
                     COLOR_SIDEBAR_HIGHLIGHT,
                 );
             }
-            d.draw_text_ex(
-                font,
+            font.draw_text_ex(
+                d,
                 &display,
                 Vector2::new(rect.x + 4.0, y),
                 FONT_SIZE - 2.0,
@@ -675,8 +718,8 @@ impl AppState {
 
         if !query.is_empty() {
             y += 8.0;
-            d.draw_text_ex(
-                font,
+            font.draw_text_ex(
+                d,
                 "Matches",
                 Vector2::new(12.0, y),
                 FONT_SIZE - 2.0,
@@ -710,12 +753,13 @@ impl AppState {
                 let label = format!(
                     "{} ({})",
                     def_name,
-                    target.module_path
+                    target
+                        .module_path
                         .strip_prefix("crate::")
                         .unwrap_or(&target.module_path)
                 );
-                d.draw_text_ex(
-                    font,
+                font.draw_text_ex(
+                    d,
                     &label,
                     Vector2::new(rect.x + 4.0, y),
                     FONT_SIZE - 4.0,
@@ -729,7 +773,11 @@ impl AppState {
 
     fn draw_window(&self, d: &mut RaylibDrawHandle, font: &AppFont, idx: usize, is_top: bool) {
         let win = &self.windows[idx];
-        let bg = if is_top { COLOR_WINDOW_TOP } else { COLOR_WINDOW };
+        let bg = if is_top {
+            COLOR_WINDOW_TOP
+        } else {
+            COLOR_WINDOW
+        };
         d.draw_rectangle(
             win.position.x as i32,
             win.position.y as i32,
@@ -746,8 +794,8 @@ impl AppState {
             title_rect.height as i32,
             COLOR_TITLE,
         );
-        d.draw_text_ex(
-            font,
+        font.draw_text_ex(
+            d,
             &win.title,
             Vector2::new(title_rect.x + 8.0, title_rect.y + 8.0),
             FONT_SIZE,
@@ -767,8 +815,8 @@ impl AppState {
             close_rect.height as i32,
             COLOR_CLOSE,
         );
-        d.draw_text_ex(
-            font,
+        font.draw_text_ex(
+            d,
             "x",
             Vector2::new(close_rect.x + 3.0, close_rect.y - 1.0),
             FONT_SIZE,
@@ -781,14 +829,27 @@ impl AppState {
         }
     }
 
-    fn draw_code(&self, d: &mut RaylibDrawHandle, font: &AppFont, file: &ParsedFile, win: &CodeWindow) {
+    fn draw_code(
+        &self,
+        d: &mut RaylibDrawHandle,
+        font: &AppFont,
+        file: &ParsedFile,
+        win: &CodeWindow,
+    ) {
         let content_rect = win.content_rect();
         let mut breadcrumb = self.project.display_name(&file.path);
         if let Some(mod_path) = file.defs.first().map(|d| d.module_path.as_str()) {
-            breadcrumb.push_str(" · ");
+            breadcrumb.push_str(" - ");
             breadcrumb.push_str(mod_path);
         }
-        d.draw_text_ex(font, &breadcrumb, Vector2::new(content_rect.x + 8.0, content_rect.y + 2.0), FONT_SIZE - 2.0, 0.0, COLOR_BREADCRUMB);
+        font.draw_text_ex(
+            d,
+            &breadcrumb,
+            Vector2::new(content_rect.x + 8.0, content_rect.y + 2.0),
+            FONT_SIZE - 2.0,
+            0.0,
+            COLOR_BREADCRUMB,
+        );
 
         let start_y = content_rect.y + BREADCRUMB_HEIGHT;
         let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
@@ -800,8 +861,8 @@ impl AppState {
         for idx in top_visible..bottom {
             let line = &file.lines[idx];
             let text_start_x = content_rect.x + CODE_X_OFFSET;
-            d.draw_text_ex(
-                font,
+            font.draw_text_ex(
+                d,
                 &format!("{:>4}", idx + 1),
                 Vector2::new(content_rect.x + 4.0, y),
                 FONT_SIZE - 2.0,
@@ -932,8 +993,8 @@ fn draw_segments(
 ) {
     let mut x = base_x;
     for (text, color) in segments {
-        d.draw_text_ex(font, text, Vector2::new(x, y), FONT_SIZE, 0.0, *color);
-        x += font.measure_text(text, FONT_SIZE, 0.0).x;
+        font.draw_text_ex(d, text, Vector2::new(x, y), FONT_SIZE, 0.0, *color);
+        x += font.measure_width(text, FONT_SIZE, 0.0);
     }
 }
 
@@ -1062,14 +1123,16 @@ fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or(std::env::current_dir()?);
 
-    let project = ProjectModel::load(&root).with_context(|| format!("loading project at {}", root.display()))?;
+    let project = ProjectModel::load(&root)
+        .with_context(|| format!("loading project at {}", root.display()))?;
     let (mut rl, thread) = raylib::init()
         .size(1280, 780)
+        .resizable()
         .title("Rust Trace Viewer")
         .msaa_4x()
         .build();
     rl.set_target_fps(60);
-    let font = rl.get_font_default();
+    let font = load_monospace_font(&mut rl, &thread);
 
     let mut app = AppState::new(project);
 
@@ -1081,7 +1144,15 @@ fn main() -> Result<()> {
 
         let typed = collect_typed_chars(&mut rl);
         let backspace = rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE);
-        app.handle_input(&font, mouse, wheel, left_pressed, left_down, typed, backspace);
+        app.handle_input(
+            &font,
+            mouse,
+            wheel,
+            left_pressed,
+            left_down,
+            typed,
+            backspace,
+        );
 
         let mut d = rl.begin_drawing(&thread);
         app.draw(&mut d, &font, mouse);
@@ -1117,8 +1188,8 @@ fn token_rect(
 ) -> Rectangle {
     let before = &line[..start];
     let token = &line[start..start + len];
-    let width_before = font.measure_text(before, FONT_SIZE, 0.0).x;
-    let width_token = font.measure_text(token, FONT_SIZE, 0.0).x;
+    let width_before = font.measure_width(before, FONT_SIZE, 0.0);
+    let width_token = font.measure_width(token, FONT_SIZE, 0.0);
     Rectangle {
         x: base_x + width_before,
         y,
@@ -1142,4 +1213,28 @@ fn collect_typed_chars(rl: &mut RaylibHandle) -> String {
         }
     }
     out
+}
+
+fn load_monospace_font(rl: &mut RaylibHandle, thread: &RaylibThread) -> AppFont {
+    let candidates = vec![
+        env::var("TRACE_VIEWER_FONT").ok(),
+        Some("data/fonts/PressStart2P-Regular.ttf".to_string()),
+        Some("C:\\Windows\\Fonts\\Consola.ttf".to_string()),
+        Some("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf".to_string()),
+        Some("/Library/Fonts/MesloLGS NF Regular.ttf".to_string()),
+    ];
+
+    for path in candidates.into_iter().flatten() {
+        let p = PathBuf::from(&path);
+        if !p.exists() {
+            continue;
+        }
+        if let Some(path_str) = p.to_str() {
+            if let Ok(font) = rl.load_font_ex(thread, path_str, FONT_SIZE as i32, None) {
+                return AppFont::owned(font);
+            }
+        }
+    }
+
+    AppFont::default_font(rl)
 }
