@@ -1,0 +1,10 @@
+[package]
+name = "ansible"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+raylib = "5.0"
+regex = "1.10"
+walkdir = "2.5"
