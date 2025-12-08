@@ -1,16 +1,17 @@
 {
   "windows": [
     {
-      "file": "target\\debug\\build\\clang-sys-71aa2661bc4de06c\\out\\dynamic.rs",
+      "file": "target\\debug\\build\\clang-sys-71aa2661bc4de06c\\out\\common.rs",
       "position": [
-        735.0,
-        640.0
+        338.0,
+        135.0
       ],
       "size": [
         720.0,
         460.0
       ],
-      "scroll": 116.8
+      "scroll": 280.0,
+      "scroll_x": 0.0
     }
   ]
 }

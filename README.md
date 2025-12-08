@@ -10,6 +10,7 @@ A lightweight, game-like Rust code viewer that lets you explore projects by open
 - Sidebar with file list and live search; search results include matching function definitions you can jump to.
 - Mouse-wheel scrolling per window; layout (position/size/scroll) is persisted to `.trace_viewer_layout.json` in the project root.
 - Uses a real monospaced font when found (JetBrains Mono in `assets/`, Consolas on Windows, DejaVu Sans Mono on Linux, Meslo on macOS, or `TRACE_VIEWER_FONT` env override); falls back to raylib’s default if none found.
+- Horizontal scrolling for long lines (hold Shift + scroll while hovering a window).
 
 ## Controls
 - Left click: focus window/title bar; click and drag title to move; click “x” to close.

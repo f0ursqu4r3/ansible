@@ -7,4 +7,5 @@
 - Color/theme: see top constants for palette and geometry. Highlight colors and spacing are centralized near constants.
 - Input: `collect_typed_chars` loops `get_char_pressed()`. Sidebar search requires click to focus; typing is only consumed when focused. Backspace handled per-frame.
 - Fonts: `load_monospace_font` tries `TRACE_VIEWER_FONT` env, `assets/JetBrainsMono-Regular.ttf`, common OS monospace fonts, then falls back to raylib default. `AppFont` abstracts owned vs default fonts for draw/measure.
+- Horizontal scroll: Shift + mouse wheel adjusts `scroll_x` on the hovered window; positions are factored into token hit-testing and drawing.
 - Known gaps: no full module/trait resolution; external `mod` files aren’t parsed; no keyboard shortcuts/backstack; highlighting is minimal. Call spans rely on span lengths; unexpected spans fall back to name length.

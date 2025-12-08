@@ -182,6 +182,7 @@ struct CodeWindow {
     position: Vector2,
     size: Vector2,
     scroll: f32,
+    scroll_x: f32,
     is_dragging: bool,
     drag_offset: Vector2,
 }
@@ -212,6 +213,8 @@ struct SavedWindow {
     position: (f32, f32),
     size: (f32, f32),
     scroll: f32,
+    #[serde(default)]
+    scroll_x: f32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -255,16 +258,24 @@ impl AppState {
                     .and_then(|s| s.to_str())
                     .unwrap_or("file")
                     .to_string();
-                self.windows.push(CodeWindow {
+                let mut win = CodeWindow {
                     id: self.next_window_id,
                     file,
                     title,
                     position: Vector2::new(saved.position.0, saved.position.1),
                     size: Vector2::new(saved.size.0, saved.size.1),
                     scroll: saved.scroll,
+                    scroll_x: saved.scroll_x,
                     is_dragging: false,
                     drag_offset: Vector2 { x: 0.0, y: 0.0 },
-                });
+                };
+                if let Some(max) = self.parsed_height(&win.file) {
+                    win.scroll = win.scroll.min(max);
+                }
+                if let Some(max_x) = self.max_scroll_x(&win) {
+                    win.scroll_x = win.scroll_x.min(max_x);
+                }
+                self.windows.push(win);
                 self.next_window_id += 1;
             }
         }
@@ -279,6 +290,7 @@ impl AppState {
                 position: (w.position.x, w.position.y),
                 size: (w.size.x, w.size.y),
                 scroll: w.scroll,
+                scroll_x: w.scroll_x,
             })
             .collect();
         let layout = SavedLayout { windows };
@@ -314,6 +326,9 @@ impl AppState {
             if let Some(max) = self.parsed_height(&win.file) {
                 win.scroll = win.scroll.min(max);
             }
+            if let Some(max_x) = self.max_scroll_x(&win) {
+                win.scroll_x = win.scroll_x.min(max_x);
+            }
             self.windows.push(win);
             return;
         }
@@ -337,11 +352,15 @@ impl AppState {
             position: pos,
             size: Vector2::new(720.0, 460.0),
             scroll,
+            scroll_x: 0.0,
             is_dragging: false,
             drag_offset: Vector2 { x: 0.0, y: 0.0 },
         };
         if let Some(max) = self.parsed_height(&win.file) {
             win.scroll = win.scroll.min(max);
+        }
+        if let Some(max_x) = self.max_scroll_x(&win) {
+            win.scroll_x = win.scroll_x.min(max_x);
         }
         self.next_window_id += 1;
         self.windows.push(win);
@@ -352,6 +371,19 @@ impl AppState {
             let total_height = pf.lines.len() as f32 * LINE_HEIGHT;
             (total_height - (TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT + 8.0)).max(0.0)
         })
+    }
+
+    fn max_scroll_x(&self, win: &CodeWindow) -> Option<f32> {
+        let pf = self.project.parsed.get(&win.file)?;
+        let mut max_width = 0.0f32;
+        for line in &pf.lines {
+            let w = estimated_line_width(line);
+            if w > max_width {
+                max_width = w;
+            }
+        }
+        let visible = (win.size.x - CODE_X_OFFSET - 24.0).max(32.0);
+        Some((max_width - visible).max(0.0))
     }
 
     fn bring_to_front(&mut self, idx: usize) {
@@ -380,6 +412,7 @@ impl AppState {
         left_down: bool,
         typed: String,
         backspace: bool,
+        shift_down: bool,
     ) {
         if !left_down {
             for w in &mut self.windows {
@@ -392,9 +425,20 @@ impl AppState {
             for idx in (0..self.windows.len()).rev() {
                 let content = self.windows[idx].content_rect();
                 if point_in_rect(mouse, content) {
-                    let max_scroll = self.max_scroll(idx);
-                    let win = &mut self.windows[idx];
-                    win.scroll = (win.scroll - wheel * LINE_HEIGHT).clamp(0.0, max_scroll);
+                    if shift_down {
+                        let max_x = {
+                            let win_ref = &self.windows[idx];
+                            self.max_scroll_x(win_ref)
+                        };
+                        let win = &mut self.windows[idx];
+                        if let Some(max_x) = max_x {
+                            win.scroll_x = (win.scroll_x - wheel * LINE_HEIGHT).clamp(0.0, max_x);
+                        }
+                    } else {
+                        let max_scroll = self.max_scroll(idx);
+                        let win = &mut self.windows[idx];
+                        win.scroll = (win.scroll - wheel * LINE_HEIGHT).clamp(0.0, max_scroll);
+                    }
                     break;
                 }
             }
@@ -578,7 +622,7 @@ impl AppState {
                 line,
                 call.col,
                 call.len,
-                content_rect.x + CODE_X_OFFSET,
+                content_rect.x + CODE_X_OFFSET - win.scroll_x,
                 content_top + (line_idx as f32 * LINE_HEIGHT) - win.scroll,
             );
             if point_in_rect(mouse, rect) {
@@ -860,7 +904,7 @@ impl AppState {
 
         for idx in top_visible..bottom {
             let line = &file.lines[idx];
-            let text_start_x = content_rect.x + CODE_X_OFFSET;
+            let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
             font.draw_text_ex(
                 d,
                 &format!("{:>4}", idx + 1),
@@ -996,6 +1040,11 @@ fn draw_segments(
         font.draw_text_ex(d, text, Vector2::new(x, y), FONT_SIZE, 0.0, *color);
         x += font.measure_width(text, FONT_SIZE, 0.0);
     }
+}
+
+fn estimated_line_width(line: &str) -> f32 {
+    // Rough approximation for monospace fonts where glyph width ~0.6 * font size.
+    line.chars().count() as f32 * FONT_SIZE * 0.6
 }
 
 struct SyntaxCollector<'a> {
@@ -1141,6 +1190,8 @@ fn main() -> Result<()> {
         let wheel = rl.get_mouse_wheel_move();
         let left_pressed = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let left_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
+        let shift_down = rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
+            || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
 
         let typed = collect_typed_chars(&mut rl);
         let backspace = rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE);
@@ -1152,6 +1203,7 @@ fn main() -> Result<()> {
             left_down,
             typed,
             backspace,
+            shift_down,
         );
 
         let mut d = rl.begin_drawing(&thread);
