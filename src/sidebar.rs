@@ -1,12 +1,17 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use anyhow::{Result, anyhow};
 use raylib::prelude::*;
 
 use crate::{
-    point_in_rect, AppFont, DefinitionLocation, ProjectModel, COLOR_LINE_NUM, COLOR_PROJECT,
-    COLOR_SEARCH_BG, COLOR_SIDEBAR, COLOR_SIDEBAR_HIGHLIGHT, COLOR_SIDEBAR_TEXT, FONT_SIZE,
-    SIDEBAR_ROW_H, SIDEBAR_WIDTH,
+    AppFont, COLOR_LINE_NUM, COLOR_PROJECT, COLOR_SEARCH_BG, COLOR_SIDEBAR,
+    COLOR_SIDEBAR_HIGHLIGHT, COLOR_SIDEBAR_TEXT, DefinitionLocation, FONT_SIZE, ProjectModel,
+    SIDEBAR_ROW_H, SIDEBAR_WIDTH, point_in_rect,
+};
+use resvg::{
+    tiny_skia::{Pixmap, Transform},
+    usvg,
 };
 
 #[derive(Clone)]
@@ -18,22 +23,78 @@ struct TreeEntry {
 }
 
 pub enum SidebarAction {
-    None,
     OpenFile { path: PathBuf, line: Option<usize> },
+}
+
+struct Icons {
+    folder: Option<Texture2D>,
+    file: Option<Texture2D>,
+    size: u32,
+}
+
+impl Icons {
+    fn load(rl: &mut RaylibHandle, thread: &RaylibThread, size: u32) -> Self {
+        let folder = load_svg_texture(rl, thread, "data/icons/folder.svg", size);
+        let file = load_svg_texture(rl, thread, "data/icons/document.svg", size);
+        Self { folder, file, size }
+    }
+
+    fn texture_for(&self, is_dir: bool) -> Option<&Texture2D> {
+        if is_dir {
+            self.folder.as_ref()
+        } else {
+            self.file.as_ref()
+        }
+    }
+}
+
+fn load_svg_texture(
+    rl: &mut RaylibHandle,
+    thread: &RaylibThread,
+    path: &str,
+    size: u32,
+) -> Option<Texture2D> {
+    let png_bytes = rasterize_svg_to_png(path, size).ok()?;
+    let image = Image::load_image_from_mem(".png", &png_bytes).ok()?;
+    rl.load_texture_from_image(thread, &image).ok()
+}
+
+fn rasterize_svg_to_png(path: &str, size: u32) -> Result<Vec<u8>> {
+    let data = std::fs::read(path)?;
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_data(&data, &opt)?;
+    let mut pixmap = Pixmap::new(size, size).ok_or_else(|| anyhow!("pixmap allocation failed"))?;
+    let svg_size = tree.size();
+    let scale_x = size as f32 / svg_size.width();
+    let scale_y = size as f32 / svg_size.height();
+    let transform = Transform::from_scale(scale_x, scale_y);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    let mut png_data = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_data, size, size);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header()?;
+        writer.write_image_data(pixmap.data())?;
+    }
+    Ok(png_data)
 }
 
 pub struct SidebarState {
     pub search_query: String,
     pub search_focused: bool,
     pub scroll: f32,
+    icons: Icons,
 }
 
 impl SidebarState {
-    pub fn new() -> Self {
+    pub fn with_icons(rl: &mut RaylibHandle, thread: &RaylibThread) -> Self {
         Self {
             search_query: String::new(),
             search_focused: false,
             scroll: 0.0,
+            icons: Icons::load(rl, thread, 16),
         }
     }
 
@@ -290,12 +351,23 @@ impl SidebarState {
                     COLOR_SIDEBAR_HIGHLIGHT,
                 );
             }
-            let prefix = if entry.is_dir { "[D] " } else { "[F] " };
-            let label = format!("{}{}", prefix, entry.display);
+            let icon_offset = if let Some(tex) = self.icons.texture_for(entry.is_dir) {
+                d.draw_texture_ex(
+                    tex,
+                    Vector2::new(rect.x + 2.0, visible_y + 3.0),
+                    0.0,
+                    (self.icons.size as f32) / (tex.height as f32),
+                    Color::WHITE,
+                );
+                self.icons.size as f32 + 6.0
+            } else {
+                0.0
+            };
+            let label = &entry.display;
             font.draw_text_ex(
                 d,
-                &label,
-                Vector2::new(rect.x + 4.0, visible_y + 2.0),
+                label,
+                Vector2::new(rect.x + 4.0 + icon_offset, visible_y + 2.0),
                 FONT_SIZE - 2.0,
                 0.0,
                 COLOR_SIDEBAR_TEXT,

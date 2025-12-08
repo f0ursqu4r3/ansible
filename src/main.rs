@@ -351,12 +351,12 @@ impl AppState {
         Ok(())
     }
 
-    fn new(project: ProjectModel) -> Self {
+    fn new(project: ProjectModel, rl: &mut RaylibHandle, thread: &RaylibThread) -> Self {
         let mut state = Self {
             project,
             windows: Vec::new(),
             next_window_id: 1,
-            sidebar: SidebarState::new(),
+            sidebar: SidebarState::with_icons(rl, thread),
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -533,17 +533,12 @@ impl AppState {
             }
 
             if !handled {
-                if let Some(action) =
+                if let Some(SidebarAction::OpenFile { path, line }) =
                     self.sidebar
                         .handle_click(mouse, &self.project, &self.project.defs)
                 {
-                    match action {
-                        SidebarAction::OpenFile { path, line } => {
-                            self.open_file(path, line);
-                            handled = true;
-                        }
-                        SidebarAction::None => {}
-                    }
+                    self.open_file(path, line);
+                    handled = true;
                 }
             }
 
@@ -1128,7 +1123,7 @@ fn main() -> Result<()> {
     rl.set_target_fps(60);
     let font = load_monospace_font(&mut rl, &thread);
 
-    let mut app = AppState::new(project);
+    let mut app = AppState::new(project, &mut rl, &thread);
 
     while !rl.window_should_close() {
         let mouse = rl.get_mouse_position();
