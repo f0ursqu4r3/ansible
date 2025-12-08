@@ -1,0 +1,8 @@
+pub const FONT_SIZE: f32 = 10.0;
+pub const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
+pub const TITLE_BAR_HEIGHT: f32 = 32.0;
+pub const SIDEBAR_WIDTH: f32 = 260.0;
+pub const CODE_X_OFFSET: f32 = 52.0;
+pub const BREADCRUMB_HEIGHT: f32 = 20.0;
+pub const LAYOUT_FILE: &str = ".trace_viewer_layout.json";
+pub const SIDEBAR_ROW_H: f32 = 22.0;

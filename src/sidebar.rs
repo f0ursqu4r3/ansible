@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 use raylib::prelude::*;
 
-use crate::{
-    point_in_rect, AppFont, DefinitionLocation, ProjectModel, FONT_SIZE, SIDEBAR_ROW_H,
-    SIDEBAR_WIDTH,
-};
+use crate::constants::{FONT_SIZE, SIDEBAR_ROW_H, SIDEBAR_WIDTH};
+use crate::model::{DefinitionLocation, ProjectModel};
+use crate::theme::Palette;
+use crate::{point_in_rect, AppFont};
 use resvg::{
     tiny_skia::{Pixmap, Transform},
     usvg,
@@ -255,7 +255,7 @@ impl SidebarState {
         mouse: Vector2,
         project: &ProjectModel,
         defs: &std::collections::HashMap<String, Vec<DefinitionLocation>>,
-        palette: &crate::Palette,
+        palette: &Palette,
     ) {
         d.draw_rectangle(0, 0, SIDEBAR_WIDTH as i32, d.get_screen_height(), palette.sidebar);
         font.draw_text_ex(
