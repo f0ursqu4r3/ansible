@@ -5,9 +5,8 @@ use anyhow::{Result, anyhow};
 use raylib::prelude::*;
 
 use crate::{
-    AppFont, COLOR_LINE_NUM, COLOR_PROJECT, COLOR_SEARCH_BG, COLOR_SIDEBAR,
-    COLOR_SIDEBAR_HIGHLIGHT, COLOR_SIDEBAR_TEXT, DefinitionLocation, FONT_SIZE, ProjectModel,
-    SIDEBAR_ROW_H, SIDEBAR_WIDTH, point_in_rect,
+    point_in_rect, AppFont, DefinitionLocation, ProjectModel, FONT_SIZE, SIDEBAR_ROW_H,
+    SIDEBAR_WIDTH,
 };
 use resvg::{
     tiny_skia::{Pixmap, Transform},
@@ -256,21 +255,16 @@ impl SidebarState {
         mouse: Vector2,
         project: &ProjectModel,
         defs: &std::collections::HashMap<String, Vec<DefinitionLocation>>,
+        palette: &crate::Palette,
     ) {
-        d.draw_rectangle(
-            0,
-            0,
-            SIDEBAR_WIDTH as i32,
-            d.get_screen_height(),
-            COLOR_SIDEBAR,
-        );
+        d.draw_rectangle(0, 0, SIDEBAR_WIDTH as i32, d.get_screen_height(), palette.sidebar);
         font.draw_text_ex(
             d,
             "Project",
             Vector2::new(12.0, 10.0),
             FONT_SIZE + 2.0,
             0.0,
-            COLOR_PROJECT,
+            palette.project,
         );
 
         let search_rect = self.search_rect();
@@ -279,7 +273,7 @@ impl SidebarState {
             search_rect.y as i32,
             search_rect.width as i32,
             search_rect.height as i32,
-            COLOR_SEARCH_BG,
+            palette.search_bg,
         );
         if self.search_focused {
             d.draw_rectangle_lines(
@@ -287,7 +281,7 @@ impl SidebarState {
                 (search_rect.y - 1.0) as i32,
                 (search_rect.width + 2.0) as i32,
                 (search_rect.height + 2.0) as i32,
-                COLOR_PROJECT,
+                palette.project,
             );
         }
         let search_text = if self.search_query.is_empty() {
@@ -296,9 +290,9 @@ impl SidebarState {
             &self.search_query
         };
         let search_color = if self.search_query.is_empty() {
-            COLOR_LINE_NUM
+            palette.line_num
         } else {
-            COLOR_SIDEBAR_TEXT
+            palette.sidebar_text
         };
         font.draw_text_ex(
             d,
@@ -310,7 +304,7 @@ impl SidebarState {
         );
 
         let query = self.search_query.to_lowercase();
-        let mut y = search_rect.y + search_rect.height + 10.0;
+        let y = search_rect.y + search_rect.height + 10.0;
         let entries = self.sidebar_entries(project);
         let filtered: Vec<&TreeEntry> = if query.is_empty() {
             entries.iter().collect()
@@ -348,9 +342,9 @@ impl SidebarState {
                     rect.y as i32,
                     rect.width as i32,
                     rect.height as i32,
-                    COLOR_SIDEBAR_HIGHLIGHT,
-                );
-            }
+                palette.sidebar_highlight,
+            );
+        }
             let icon_offset = if let Some(tex) = self.icons.texture_for(entry.is_dir) {
                 d.draw_texture_ex(
                     tex,
@@ -370,7 +364,7 @@ impl SidebarState {
                 Vector2::new(rect.x + 4.0 + icon_offset, visible_y + 2.0),
                 FONT_SIZE - 2.0,
                 0.0,
-                COLOR_SIDEBAR_TEXT,
+                palette.sidebar_text,
             );
             visible_y += SIDEBAR_ROW_H;
         }
@@ -383,7 +377,7 @@ impl SidebarState {
                 Vector2::new(12.0, y_matches),
                 FONT_SIZE - 2.0,
                 0.0,
-                COLOR_PROJECT,
+                palette.project,
             );
             y_matches += 18.0;
             for (def_name, def) in defs
@@ -404,7 +398,7 @@ impl SidebarState {
                         rect.y as i32,
                         rect.width as i32,
                         rect.height as i32,
-                        COLOR_SIDEBAR_HIGHLIGHT,
+                        palette.sidebar_highlight,
                     );
                 }
                 let label = format!(
@@ -421,7 +415,7 @@ impl SidebarState {
                     Vector2::new(rect.x + 4.0, y_matches),
                     FONT_SIZE - 4.0,
                     0.0,
-                    COLOR_SIDEBAR_TEXT,
+                    palette.sidebar_text,
                 );
                 y_matches += 20.0;
             }

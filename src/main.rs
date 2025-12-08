@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use plist::Value as PlistValue;
 use proc_macro2::Span;
 use raylib::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -22,23 +23,155 @@ pub const BREADCRUMB_HEIGHT: f32 = 20.0;
 pub const LAYOUT_FILE: &str = ".trace_viewer_layout.json";
 pub const SIDEBAR_ROW_H: f32 = 22.0;
 
-pub const COLOR_BG: Color = Color::new(18, 18, 24, 255);
-pub const COLOR_SIDEBAR: Color = Color::new(28, 28, 36, 255);
-pub const COLOR_WINDOW_TOP: Color = Color::new(40, 42, 58, 240);
-pub const COLOR_WINDOW: Color = Color::new(30, 30, 40, 220);
-pub const COLOR_TITLE: Color = Color::new(60, 64, 90, 255);
-pub const COLOR_TEXT: Color = Color::new(220, 220, 230, 255);
-pub const COLOR_COMMENT: Color = Color::new(120, 130, 150, 255);
-pub const COLOR_STRING: Color = Color::new(180, 200, 140, 255);
-pub const COLOR_KEYWORD: Color = Color::new(255, 170, 120, 255);
-pub const COLOR_CALL: Color = Color::new(120, 200, 255, 255);
-pub const COLOR_LINE_NUM: Color = Color::new(90, 100, 130, 255);
-pub const COLOR_CLOSE: Color = Color::new(230, 120, 120, 255);
-pub const COLOR_PROJECT: Color = Color::new(200, 210, 255, 255);
-pub const COLOR_SIDEBAR_TEXT: Color = Color::new(210, 210, 220, 255);
-pub const COLOR_SIDEBAR_HIGHLIGHT: Color = Color::new(70, 90, 140, 140);
-pub const COLOR_SEARCH_BG: Color = Color::new(40, 44, 60, 255);
-pub const COLOR_BREADCRUMB: Color = Color::new(140, 150, 170, 255);
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub bg: Color,
+    pub sidebar: Color,
+    pub window_top: Color,
+    pub window: Color,
+    pub title: Color,
+    pub text: Color,
+    pub comment: Color,
+    pub string: Color,
+    pub keyword: Color,
+    pub call: Color,
+    pub line_num: Color,
+    pub close: Color,
+    pub project: Color,
+    pub sidebar_text: Color,
+    pub sidebar_highlight: Color,
+    pub search_bg: Color,
+    pub breadcrumb: Color,
+}
+
+fn default_palette() -> Palette {
+    Palette {
+        bg: Color::new(18, 18, 24, 255),
+        sidebar: Color::new(28, 28, 36, 255),
+        window_top: Color::new(40, 42, 58, 240),
+        window: Color::new(30, 30, 40, 220),
+        title: Color::new(60, 64, 90, 255),
+        text: Color::new(220, 220, 230, 255),
+        comment: Color::new(120, 130, 150, 255),
+        string: Color::new(180, 200, 140, 255),
+        keyword: Color::new(255, 170, 120, 255),
+        call: Color::new(120, 200, 255, 255),
+        line_num: Color::new(90, 100, 130, 255),
+        close: Color::new(230, 120, 120, 255),
+        project: Color::new(200, 210, 255, 255),
+        sidebar_text: Color::new(210, 210, 220, 255),
+        sidebar_highlight: Color::new(70, 90, 140, 140),
+        search_bg: Color::new(40, 44, 60, 255),
+        breadcrumb: Color::new(140, 150, 170, 255),
+    }
+}
+
+fn load_tmtheme_palette() -> Option<Palette> {
+    let theme_path = env::var("TM_THEME").ok().map(PathBuf::from).or_else(|| {
+        let p = PathBuf::from("data/themes/Material-Theme.tmtheme");
+        if p.exists() { Some(p) } else { None }
+    })?;
+    let data = fs::read(theme_path).ok()?;
+    let plist = PlistValue::from_reader_xml(&*data).ok()?;
+    let plist_dict = plist.as_dictionary()?;
+    let settings = plist_dict.get("settings")?.as_array()?;
+
+    let mut palette = default_palette();
+
+    for item in settings {
+        let dict = item.as_dictionary()?;
+        let setting_values = dict.get("settings")?.as_dictionary()?;
+        let scope = dict.get("scope").and_then(|v| v.as_string()).unwrap_or("");
+        if scope.is_empty() {
+            if let Some(bg) = setting_values
+                .get("background")
+                .and_then(|v| v.as_string())
+                .and_then(parse_hex_color)
+            {
+                palette.bg = bg;
+                palette.sidebar = bg;
+                palette.window = bg;
+            }
+            if let Some(fg) = setting_values
+                .get("foreground")
+                .and_then(|v| v.as_string())
+                .and_then(parse_hex_color)
+            {
+                palette.text = fg;
+                palette.project = fg;
+                palette.sidebar_text = fg;
+                palette.line_num = fg;
+                palette.breadcrumb = fg;
+            }
+            continue;
+        }
+
+        let fg = setting_values
+            .get("foreground")
+            .and_then(|v| v.as_string())
+            .and_then(parse_hex_color);
+        if let Some(color) = fg {
+            if scope.contains("comment") {
+                palette.comment = color;
+            }
+            if scope.contains("string") {
+                palette.string = color;
+            }
+            if scope.contains("keyword") {
+                palette.keyword = color;
+            }
+            if scope.contains("entity.name.function") || scope.contains("support.function") {
+                palette.call = color;
+            }
+        }
+    }
+
+    // derive highlight/search bg if we changed bg
+    palette.sidebar_highlight = Color::new(
+        (palette.project.r as f32 * 0.3 + palette.bg.r as f32 * 0.7) as u8,
+        (palette.project.g as f32 * 0.3 + palette.bg.g as f32 * 0.7) as u8,
+        (palette.project.b as f32 * 0.3 + palette.bg.b as f32 * 0.7) as u8,
+        140,
+    );
+    palette.search_bg = Color::new(
+        (palette.bg.r as f32 * 0.9) as u8,
+        (palette.bg.g as f32 * 0.9) as u8,
+        (palette.bg.b as f32 * 0.9) as u8,
+        255,
+    );
+
+    Some(palette)
+}
+
+fn parse_hex_color(s: &str) -> Option<Color> {
+    let hex = s.trim().trim_start_matches('#');
+    let bytes = u32::from_str_radix(hex, 16).ok()?;
+    match hex.len() {
+        6 => {
+            let r = ((bytes >> 16) & 0xFF) as u8;
+            let g = ((bytes >> 8) & 0xFF) as u8;
+            let b = (bytes & 0xFF) as u8;
+            Some(Color::new(r, g, b, 255))
+        }
+        8 => {
+            let a = ((bytes >> 24) & 0xFF) as u8;
+            let r = ((bytes >> 16) & 0xFF) as u8;
+            let g = ((bytes >> 8) & 0xFF) as u8;
+            let b = (bytes & 0xFF) as u8;
+            Some(Color::new(r, g, b, a))
+        }
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ColorKind {
+    Text,
+    Comment,
+    String,
+    Keyword,
+    Call,
+}
 const KEYWORDS: [&str; 21] = [
     "if", "else", "for", "while", "loop", "match", "fn", "pub", "impl", "struct", "enum", "use",
     "let", "in", "where", "return", "async", "mod", "trait", "const", "static",
@@ -261,6 +394,7 @@ struct AppState {
     windows: Vec<CodeWindow>,
     next_window_id: usize,
     sidebar: SidebarState,
+    palette: Palette,
 }
 
 impl AppState {
@@ -352,11 +486,13 @@ impl AppState {
     }
 
     fn new(project: ProjectModel, rl: &mut RaylibHandle, thread: &RaylibThread) -> Self {
+        let palette = load_tmtheme_palette().unwrap_or_else(default_palette);
         let mut state = Self {
             project,
             windows: Vec::new(),
             next_window_id: 1,
             sidebar: SidebarState::with_icons(rl, thread),
+            palette,
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -660,9 +796,15 @@ impl AppState {
     }
 
     fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
-        d.clear_background(COLOR_BG);
-        self.sidebar
-            .draw(d, font, mouse, &self.project, &self.project.defs);
+        d.clear_background(self.palette.bg);
+        self.sidebar.draw(
+            d,
+            font,
+            mouse,
+            &self.project,
+            &self.project.defs,
+            &self.palette,
+        );
         for idx in 0..self.windows.len() {
             let is_top = idx + 1 == self.windows.len();
             self.draw_window(d, font, idx, is_top);
@@ -672,9 +814,9 @@ impl AppState {
     fn draw_window(&self, d: &mut RaylibDrawHandle, font: &AppFont, idx: usize, is_top: bool) {
         let win = &self.windows[idx];
         let bg = if is_top {
-            COLOR_WINDOW_TOP
+            self.palette.window_top
         } else {
-            COLOR_WINDOW
+            self.palette.window
         };
         d.draw_rectangle(
             win.position.x as i32,
@@ -690,7 +832,7 @@ impl AppState {
             title_rect.y as i32,
             title_rect.width as i32,
             title_rect.height as i32,
-            COLOR_TITLE,
+            self.palette.title,
         );
         font.draw_text_ex(
             d,
@@ -698,7 +840,7 @@ impl AppState {
             Vector2::new(title_rect.x + 8.0, title_rect.y + 8.0),
             FONT_SIZE,
             0.0,
-            COLOR_TEXT,
+            self.palette.text,
         );
         let close_rect = Rectangle {
             x: title_rect.x + title_rect.width - 24.0,
@@ -711,7 +853,7 @@ impl AppState {
             close_rect.y as i32,
             close_rect.width as i32,
             close_rect.height as i32,
-            COLOR_CLOSE,
+            self.palette.close,
         );
         font.draw_text_ex(
             d,
@@ -719,7 +861,7 @@ impl AppState {
             Vector2::new(close_rect.x + 3.0, close_rect.y - 1.0),
             FONT_SIZE,
             0.0,
-            COLOR_CLOSE,
+            self.palette.close,
         );
 
         if let Some(pf) = self.project.parsed.get(&win.file) {
@@ -746,7 +888,7 @@ impl AppState {
             Vector2::new(content_rect.x + 8.0, content_rect.y + 2.0),
             FONT_SIZE - 2.0,
             0.0,
-            COLOR_BREADCRUMB,
+            self.palette.breadcrumb,
         );
 
         let start_y = content_rect.y + BREADCRUMB_HEIGHT;
@@ -765,13 +907,13 @@ impl AppState {
                 Vector2::new(content_rect.x + 4.0, y),
                 FONT_SIZE - 2.0,
                 0.0,
-                COLOR_LINE_NUM,
+                self.palette.line_num,
             );
 
             let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
             if calls.is_empty() {
                 let segments = colorize_line(line, &[]);
-                draw_segments(d, font, text_start_x, y, &segments);
+                draw_segments(d, font, text_start_x, y, &segments, &self.palette);
             } else {
                 self.draw_line_with_calls(d, font, line, text_start_x, y, &calls);
             }
@@ -790,7 +932,7 @@ impl AppState {
         calls: &[&FunctionCall],
     ) {
         let segments = colorize_line(line, calls);
-        draw_segments(d, font, base_x, y, &segments);
+        draw_segments(d, font, base_x, y, &segments, &self.palette);
     }
 
     fn open_definition(&mut self, def: DefinitionLocation) {
@@ -880,8 +1022,8 @@ impl AppState {
     }
 }
 
-fn colorize_line(line: &str, calls: &[&FunctionCall]) -> Vec<(String, Color)> {
-    let mut segments: Vec<(String, Color)> = Vec::new();
+fn colorize_line(line: &str, calls: &[&FunctionCall]) -> Vec<(String, ColorKind)> {
+    let mut segments: Vec<(String, ColorKind)> = Vec::new();
     let mut i = 0;
     let bytes = line.as_bytes();
     let len = bytes.len();
@@ -891,14 +1033,14 @@ fn colorize_line(line: &str, calls: &[&FunctionCall]) -> Vec<(String, Color)> {
     while i < len {
         if let Some(&(start, clen)) = call_ranges.iter().find(|&&(s, _)| s == i) {
             let text = line[start..start + clen].to_string();
-            append_segment(&mut segments, text, COLOR_CALL);
+            append_segment(&mut segments, text, ColorKind::Call);
             i += clen;
             continue;
         }
 
         if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
             let text = line[i..].to_string();
-            append_segment(&mut segments, text, COLOR_COMMENT);
+            append_segment(&mut segments, text, ColorKind::Comment);
             break;
         }
 
@@ -921,7 +1063,7 @@ fn colorize_line(line: &str, calls: &[&FunctionCall]) -> Vec<(String, Color)> {
                 i += 1;
             }
             let text = line[start..i].to_string();
-            append_segment(&mut segments, text, COLOR_STRING);
+            append_segment(&mut segments, text, ColorKind::String);
             continue;
         }
 
@@ -939,23 +1081,23 @@ fn colorize_line(line: &str, calls: &[&FunctionCall]) -> Vec<(String, Color)> {
             }
             let word = &line[start..i];
             let color = if KEYWORDS.iter().any(|k| *k == word) {
-                COLOR_KEYWORD
+                ColorKind::Keyword
             } else {
-                COLOR_TEXT
+                ColorKind::Text
             };
             append_segment(&mut segments, word.to_string(), color);
             continue;
         }
 
         let ch = &line[i..i + 1];
-        append_segment(&mut segments, ch.to_string(), COLOR_TEXT);
+        append_segment(&mut segments, ch.to_string(), ColorKind::Text);
         i += 1;
     }
 
     segments
 }
 
-fn append_segment(segments: &mut Vec<(String, Color)>, text: String, color: Color) {
+fn append_segment(segments: &mut Vec<(String, ColorKind)>, text: String, color: ColorKind) {
     if text.is_empty() {
         return;
     }
@@ -973,11 +1115,19 @@ fn draw_segments(
     font: &AppFont,
     base_x: f32,
     y: f32,
-    segments: &[(String, Color)],
+    segments: &[(String, ColorKind)],
+    palette: &Palette,
 ) {
     let mut x = base_x;
     for (text, color) in segments {
-        font.draw_text_ex(d, text, Vector2::new(x, y), FONT_SIZE, 0.0, *color);
+        let c = match color {
+            ColorKind::Text => palette.text,
+            ColorKind::Comment => palette.comment,
+            ColorKind::String => palette.string,
+            ColorKind::Keyword => palette.keyword,
+            ColorKind::Call => palette.call,
+        };
+        font.draw_text_ex(d, text, Vector2::new(x, y), FONT_SIZE, 0.0, c);
         x += font.measure_width(text, FONT_SIZE, 0.0);
     }
 }
