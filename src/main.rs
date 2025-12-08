@@ -10,6 +10,7 @@ const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
 const TITLE_BAR_HEIGHT: f32 = 32.0;
 const SIDEBAR_WIDTH: f32 = 260.0;
 const CODE_X_OFFSET: f32 = 52.0;
+type AppFont = WeakFont;
 
 #[derive(Clone, Debug)]
 struct FunctionDef {
@@ -166,7 +167,7 @@ impl AppState {
         if let Some(idx) = self.windows.iter().position(|w| w.file == path) {
             let mut win = self.windows.remove(idx);
             if let Some(line) = jump_to {
-                win.scroll = (line as f32 * LINE_HEIGHT).saturating_sub(40.0);
+                win.scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
             }
             self.windows.push(win);
             return;
@@ -178,7 +179,7 @@ impl AppState {
         );
         let mut scroll = 0.0;
         if let Some(line) = jump_to {
-            scroll = (line as f32 * LINE_HEIGHT).saturating_sub(40.0);
+            scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
         }
         let win = CodeWindow {
             id: self.next_window_id,
@@ -204,8 +205,7 @@ impl AppState {
 
     fn handle_input(
         &mut self,
-        rl: &mut RaylibHandle,
-        font: &Font,
+        font: &AppFont,
         mouse: Vector2,
         wheel: f32,
         left_pressed: bool,
@@ -246,7 +246,7 @@ impl AppState {
                 if self.window_hit_test(idx, mouse) {
                     self.bring_to_front(idx);
                     let top_idx = self.windows.len() - 1;
-                    let action = self.handle_window_click(rl, font, top_idx, mouse);
+                    let action = self.handle_window_click(font, top_idx, mouse);
                     match action {
                         WindowAction::Close => {
                             self.windows.pop();
@@ -295,8 +295,7 @@ impl AppState {
 
     fn handle_window_click(
         &mut self,
-        rl: &mut RaylibHandle,
-        font: &Font,
+        font: &AppFont,
         idx: usize,
         mouse: Vector2,
     ) -> WindowAction {
@@ -326,7 +325,7 @@ impl AppState {
         }
 
         if let Some(pf) = self.project.parsed.get(&win.file) {
-            if let Some(def) = self.hit_test_calls(rl, font, pf, win, mouse) {
+            if let Some(def) = self.hit_test_calls(font, pf, win, mouse) {
                 return WindowAction::OpenDefinition(def);
             }
         }
@@ -336,8 +335,7 @@ impl AppState {
 
     fn hit_test_calls(
         &self,
-        rl: &mut RaylibHandle,
-        font: &Font,
+        font: &AppFont,
         file: &ParsedFile,
         win: &CodeWindow,
         mouse: Vector2,
@@ -360,7 +358,6 @@ impl AppState {
 
         for call in calls {
             let rect = token_rect(
-                rl,
                 font,
                 line,
                 call.col,
@@ -398,7 +395,7 @@ impl AppState {
         0.0
     }
 
-    fn draw(&mut self, d: &mut RaylibDrawHandle, font: &Font) {
+    fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont) {
         d.clear_background(Color::new(18, 18, 24, 255));
         self.draw_sidebar(d, font);
         for idx in 0..self.windows.len() {
@@ -407,7 +404,7 @@ impl AppState {
         }
     }
 
-    fn draw_sidebar(&self, d: &mut RaylibDrawHandle, font: &Font) {
+    fn draw_sidebar(&self, d: &mut RaylibDrawHandle, font: &AppFont) {
         d.draw_rectangle(0, 0, SIDEBAR_WIDTH as i32, d.get_screen_height(), Color::new(28, 28, 36, 255));
         d.draw_text_ex(
             font,
@@ -433,7 +430,7 @@ impl AppState {
         }
     }
 
-    fn draw_window(&self, d: &mut RaylibDrawHandle, font: &Font, idx: usize, is_top: bool) {
+    fn draw_window(&self, d: &mut RaylibDrawHandle, font: &AppFont, idx: usize, is_top: bool) {
         let win = &self.windows[idx];
         let bg = if is_top {
             Color::new(40, 42, 58, 240)
@@ -491,7 +488,7 @@ impl AppState {
         }
     }
 
-    fn draw_code(&self, d: &mut RaylibDrawHandle, font: &Font, file: &ParsedFile, win: &CodeWindow) {
+    fn draw_code(&self, d: &mut RaylibDrawHandle, font: &AppFont, file: &ParsedFile, win: &CodeWindow) {
         let content_rect = win.content_rect();
         let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
         let lines_visible = ((content_rect.height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
@@ -532,7 +529,7 @@ impl AppState {
     fn draw_line_with_calls(
         &self,
         d: &mut RaylibDrawHandle,
-        font: &Font,
+        font: &AppFont,
         line: &str,
         base_x: f32,
         y: f32,
@@ -545,12 +542,12 @@ impl AppState {
                 let slice = &line[cursor..call.col];
                 if !slice.is_empty() {
                     d.draw_text_ex(font, slice, Vector2::new(x, y), FONT_SIZE, 0.0, Color::new(220, 220, 230, 255));
-                    x += d.measure_text_ex(font, slice, FONT_SIZE, 0.0).x;
+                    x += font.measure_text(slice, FONT_SIZE, 0.0).x;
                 }
             }
             let name = &line[call.col..call.col + call.len];
             d.draw_text_ex(font, name, Vector2::new(x, y), FONT_SIZE, 0.0, Color::new(120, 200, 255, 255));
-            x += d.measure_text_ex(font, name, FONT_SIZE, 0.0).x;
+            x += font.measure_text(name, FONT_SIZE, 0.0).x;
             cursor = call.col + call.len;
         }
         if cursor < line.len() {
@@ -580,10 +577,10 @@ fn main() -> Result<()> {
     while !rl.window_should_close() {
         let mouse = rl.get_mouse_position();
         let wheel = rl.get_mouse_wheel_move();
-        let left_pressed = rl.is_mouse_button_pressed(MouseButton::MOUSE_LEFT_BUTTON);
-        let left_down = rl.is_mouse_button_down(MouseButton::MOUSE_LEFT_BUTTON);
+        let left_pressed = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
+        let left_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
 
-        app.handle_input(&mut rl, &font, mouse, wheel, left_pressed, left_down);
+        app.handle_input(&font, mouse, wheel, left_pressed, left_down);
 
         let mut d = rl.begin_drawing(&thread);
         app.draw(&mut d, &font);
@@ -664,9 +661,8 @@ fn offset_to_line_col(content: &str, offset: usize) -> (usize, usize) {
     (line, col)
 }
 
-fn token_rect<T: RaylibDraw>(
-    ctx: &mut T,
-    font: &Font,
+fn token_rect(
+    font: &AppFont,
     line: &str,
     start: usize,
     len: usize,
@@ -675,8 +671,8 @@ fn token_rect<T: RaylibDraw>(
 ) -> Rectangle {
     let before = &line[..start];
     let token = &line[start..start + len];
-    let width_before = ctx.measure_text_ex(font, before, FONT_SIZE, 0.0).x;
-    let width_token = ctx.measure_text_ex(font, token, FONT_SIZE, 0.0).x;
+    let width_before = font.measure_text(before, FONT_SIZE, 0.0).x;
+    let width_token = font.measure_text(token, FONT_SIZE, 0.0).x;
     Rectangle {
         x: base_x + width_before,
         y,
