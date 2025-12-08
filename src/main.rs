@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
+use proc_macro2::Span;
 use raylib::prelude::*;
-use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
+use syn::visit::Visit;
 use walkdir::WalkDir;
 
 const FONT_SIZE: f32 = 18.0;
@@ -10,11 +13,36 @@ const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
 const TITLE_BAR_HEIGHT: f32 = 32.0;
 const SIDEBAR_WIDTH: f32 = 260.0;
 const CODE_X_OFFSET: f32 = 52.0;
+const BREADCRUMB_HEIGHT: f32 = 20.0;
+const LAYOUT_FILE: &str = ".trace_viewer_layout.json";
+
+const COLOR_BG: Color = Color::new(18, 18, 24, 255);
+const COLOR_SIDEBAR: Color = Color::new(28, 28, 36, 255);
+const COLOR_WINDOW_TOP: Color = Color::new(40, 42, 58, 240);
+const COLOR_WINDOW: Color = Color::new(30, 30, 40, 220);
+const COLOR_TITLE: Color = Color::new(60, 64, 90, 255);
+const COLOR_TEXT: Color = Color::new(220, 220, 230, 255);
+const COLOR_COMMENT: Color = Color::new(120, 130, 150, 255);
+const COLOR_STRING: Color = Color::new(180, 200, 140, 255);
+const COLOR_KEYWORD: Color = Color::new(255, 170, 120, 255);
+const COLOR_CALL: Color = Color::new(120, 200, 255, 255);
+const COLOR_LINE_NUM: Color = Color::new(90, 100, 130, 255);
+const COLOR_CLOSE: Color = Color::new(230, 120, 120, 255);
+const COLOR_PROJECT: Color = Color::new(200, 210, 255, 255);
+const COLOR_SIDEBAR_TEXT: Color = Color::new(210, 210, 220, 255);
+const COLOR_SIDEBAR_HIGHLIGHT: Color = Color::new(70, 90, 140, 140);
+const COLOR_SEARCH_BG: Color = Color::new(40, 44, 60, 255);
+const COLOR_BREADCRUMB: Color = Color::new(140, 150, 170, 255);
+const KEYWORDS: [&str; 21] = [
+    "if", "else", "for", "while", "loop", "match", "fn", "pub", "impl", "struct", "enum", "use",
+    "let", "in", "where", "return", "async", "mod", "trait", "const", "static",
+];
 type AppFont = WeakFont;
 
 #[derive(Clone, Debug)]
 struct FunctionDef {
     name: String,
+    module_path: String,
     line: usize,
     col: usize,
 }
@@ -22,6 +50,7 @@ struct FunctionDef {
 #[derive(Clone, Debug)]
 struct FunctionCall {
     name: String,
+    module_path: String,
     line: usize,
     col: usize,
     len: usize,
@@ -44,6 +73,7 @@ impl ParsedFile {
 #[derive(Clone, Debug)]
 struct DefinitionLocation {
     file: PathBuf,
+    module_path: String,
     line: usize,
     col: usize,
 }
@@ -82,6 +112,7 @@ impl ProjectModel {
                     .or_default()
                     .push(DefinitionLocation {
                         file: file.clone(),
+                        module_path: def.module_path.clone(),
                         line: def.line,
                         col: def.col,
                     });
@@ -137,6 +168,19 @@ impl CodeWindow {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct SavedWindow {
+    file: String,
+    position: (f32, f32),
+    size: (f32, f32),
+    scroll: f32,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedLayout {
+    windows: Vec<SavedWindow>,
+}
+
 enum WindowAction {
     None,
     Close,
@@ -148,17 +192,77 @@ struct AppState {
     project: ProjectModel,
     windows: Vec<CodeWindow>,
     next_window_id: usize,
+    search_query: String,
+    search_focused: bool,
 }
 
 impl AppState {
+    fn layout_path(&self) -> PathBuf {
+        self.project.root.join(LAYOUT_FILE)
+    }
+
+    fn load_layout(&mut self) {
+        let path = self.layout_path();
+        let Ok(text) = fs::read_to_string(&path) else {
+            return;
+        };
+        if let Ok(layout) = serde_json::from_str::<SavedLayout>(&text) {
+            for saved in layout.windows {
+                let file = self.project.root.join(&saved.file);
+                if !self.project.parsed.contains_key(&file) {
+                    continue;
+                }
+                let title = file
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("file")
+                    .to_string();
+                self.windows.push(CodeWindow {
+                    id: self.next_window_id,
+                    file,
+                    title,
+                    position: Vector2::new(saved.position.0, saved.position.1),
+                    size: Vector2::new(saved.size.0, saved.size.1),
+                    scroll: saved.scroll,
+                    is_dragging: false,
+                    drag_offset: Vector2 { x: 0.0, y: 0.0 },
+                });
+                self.next_window_id += 1;
+            }
+        }
+    }
+
+    fn save_layout(&self) -> Result<()> {
+        let windows: Vec<SavedWindow> = self
+            .windows
+            .iter()
+            .map(|w| SavedWindow {
+                file: self.project.display_name(&w.file),
+                position: (w.position.x, w.position.y),
+                size: (w.size.x, w.size.y),
+                scroll: w.scroll,
+            })
+            .collect();
+        let layout = SavedLayout { windows };
+        let path = self.layout_path();
+        let text = serde_json::to_string_pretty(&layout)?;
+        fs::write(path, text)?;
+        Ok(())
+    }
+
     fn new(project: ProjectModel) -> Self {
         let mut state = Self {
             project,
             windows: Vec::new(),
             next_window_id: 1,
+            search_query: String::new(),
+            search_focused: false,
         };
-        if let Some(first) = state.project.files.first() {
-            state.open_file(first.clone(), None);
+        state.load_layout();
+        if state.windows.is_empty() {
+            if let Some(first) = state.project.files.first() {
+                state.open_file(first.clone(), None);
+            }
         }
         state
     }
@@ -168,6 +272,9 @@ impl AppState {
             let mut win = self.windows.remove(idx);
             if let Some(line) = jump_to {
                 win.scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
+            }
+            if let Some(max) = self.parsed_height(&win.file) {
+                win.scroll = win.scroll.min(max);
             }
             self.windows.push(win);
             return;
@@ -181,7 +288,7 @@ impl AppState {
         if let Some(line) = jump_to {
             scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
         }
-        let win = CodeWindow {
+        let mut win = CodeWindow {
             id: self.next_window_id,
             file: path.clone(),
             title: path.file_name().and_then(|s| s.to_str()).unwrap_or("file").to_string(),
@@ -191,8 +298,18 @@ impl AppState {
             is_dragging: false,
             drag_offset: Vector2 { x: 0.0, y: 0.0 },
         };
+        if let Some(max) = self.parsed_height(&win.file) {
+            win.scroll = win.scroll.min(max);
+        }
         self.next_window_id += 1;
         self.windows.push(win);
+    }
+
+    fn parsed_height(&self, file: &Path) -> Option<f32> {
+        self.project.parsed.get(file).map(|pf| {
+            let total_height = pf.lines.len() as f32 * LINE_HEIGHT;
+            (total_height - (TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT + 8.0)).max(0.0)
+        })
     }
 
     fn bring_to_front(&mut self, idx: usize) {
@@ -203,6 +320,15 @@ impl AppState {
         self.windows.push(w);
     }
 
+    fn search_rect(&self) -> Rectangle {
+        Rectangle {
+            x: 12.0,
+            y: 40.0,
+            width: SIDEBAR_WIDTH - 24.0,
+            height: 26.0,
+        }
+    }
+
     fn handle_input(
         &mut self,
         font: &AppFont,
@@ -210,6 +336,8 @@ impl AppState {
         wheel: f32,
         left_pressed: bool,
         left_down: bool,
+        typed: String,
+        backspace: bool,
     ) {
         if !left_down {
             for w in &mut self.windows {
@@ -268,17 +396,43 @@ impl AppState {
             }
 
             if !handled {
-                self.handle_sidebar_click(mouse);
+                handled = self.handle_sidebar_click(mouse);
+            }
+
+            if !handled && point_in_rect(mouse, self.search_rect()) {
+                self.search_focused = true;
+            } else if !handled {
+                self.search_focused = false;
+            }
+        }
+
+        if self.search_focused {
+            if backspace {
+                self.search_query.pop();
+            }
+            if !typed.is_empty() {
+                self.search_query.push_str(&typed);
             }
         }
     }
 
-    fn handle_sidebar_click(&mut self, mouse: Vector2) {
+    fn handle_sidebar_click(&mut self, mouse: Vector2) -> bool {
         if mouse.x > SIDEBAR_WIDTH {
-            return;
+            return false;
         }
-        let mut y = 12.0;
-        for path in &self.project.files {
+        let query = self.search_query.to_lowercase();
+        let search_rect = self.search_rect();
+        let mut y = search_rect.y + search_rect.height + 10.0;
+        let files: Vec<_> = if query.is_empty() {
+            self.project.files.iter().collect()
+        } else {
+            self.project
+                .files
+                .iter()
+                .filter(|p| self.project.display_name(p).to_lowercase().contains(&query))
+                .collect()
+        };
+        for path in files {
             let rect = Rectangle {
                 x: 10.0,
                 y,
@@ -287,10 +441,35 @@ impl AppState {
             };
             if point_in_rect(mouse, rect) {
                 self.open_file(path.clone(), None);
-                break;
+                return true;
             }
             y += 24.0;
         }
+
+        if !query.is_empty() {
+            y += 8.0 + 18.0; // spacing + "Matches" header
+            for (_, def) in self
+                .project
+                .defs
+                .iter()
+                .filter(|(name, _)| name.to_lowercase().contains(&query))
+                .take(15)
+            {
+                let rect = Rectangle {
+                    x: 10.0,
+                    y,
+                    width: SIDEBAR_WIDTH - 20.0,
+                    height: 20.0,
+                };
+                if point_in_rect(mouse, rect) {
+                    let target = def.first().unwrap();
+                    self.open_file(target.file.clone(), Some(target.line));
+                    return true;
+                }
+                y += 20.0;
+            }
+        }
+        false
     }
 
     fn handle_window_click(
@@ -341,7 +520,7 @@ impl AppState {
         mouse: Vector2,
     ) -> Option<DefinitionLocation> {
         let content_rect = win.content_rect();
-        let content_top = content_rect.y;
+        let content_top = content_rect.y + BREADCRUMB_HEIGHT;
         let local_y = mouse.y - content_top + win.scroll;
         if local_y < 0.0 {
             return None;
@@ -367,6 +546,9 @@ impl AppState {
             );
             if point_in_rect(mouse, rect) {
                 if let Some(defs) = self.project.defs.get(&call.name) {
+                    if let Some(exact) = defs.iter().find(|d| d.module_path == call.module_path) {
+                        return Some(exact.clone());
+                    }
                     return defs.first().cloned();
                 }
             }
@@ -389,54 +571,165 @@ impl AppState {
     fn max_scroll(&self, idx: usize) -> f32 {
         if let Some(pf) = self.project.parsed.get(&self.windows[idx].file) {
             let total_height = pf.lines.len() as f32 * LINE_HEIGHT;
-            let visible = self.windows[idx].size.y - TITLE_BAR_HEIGHT - 8.0;
+            let visible = self.windows[idx].size.y - TITLE_BAR_HEIGHT - BREADCRUMB_HEIGHT - 8.0;
             return (total_height - visible).max(0.0);
         }
         0.0
     }
 
-    fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont) {
-        d.clear_background(Color::new(18, 18, 24, 255));
-        self.draw_sidebar(d, font);
+    fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
+        d.clear_background(COLOR_BG);
+        self.draw_sidebar(d, font, mouse);
         for idx in 0..self.windows.len() {
             let is_top = idx + 1 == self.windows.len();
             self.draw_window(d, font, idx, is_top);
         }
     }
 
-    fn draw_sidebar(&self, d: &mut RaylibDrawHandle, font: &AppFont) {
-        d.draw_rectangle(0, 0, SIDEBAR_WIDTH as i32, d.get_screen_height(), Color::new(28, 28, 36, 255));
+    fn draw_sidebar(&self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
+        d.draw_rectangle(0, 0, SIDEBAR_WIDTH as i32, d.get_screen_height(), COLOR_SIDEBAR);
         d.draw_text_ex(
             font,
             "Project",
             Vector2::new(12.0, 10.0),
             FONT_SIZE + 2.0,
             0.0,
-            Color::new(200, 210, 255, 255),
+            COLOR_PROJECT,
         );
 
-        let mut y = 40.0;
-        for path in &self.project.files {
+        let search_rect = self.search_rect();
+        d.draw_rectangle(
+            search_rect.x as i32,
+            search_rect.y as i32,
+            search_rect.width as i32,
+            search_rect.height as i32,
+            COLOR_SEARCH_BG,
+        );
+        if self.search_focused {
+            d.draw_rectangle_lines(
+                (search_rect.x - 1.0) as i32,
+                (search_rect.y - 1.0) as i32,
+                (search_rect.width + 2.0) as i32,
+                (search_rect.height + 2.0) as i32,
+                COLOR_PROJECT,
+            );
+        }
+        let search_text = if self.search_query.is_empty() {
+            "search..."
+        } else {
+            &self.search_query
+        };
+        let search_color = if self.search_query.is_empty() {
+            COLOR_LINE_NUM
+        } else {
+            COLOR_SIDEBAR_TEXT
+        };
+        d.draw_text_ex(
+            font,
+            search_text,
+            Vector2::new(search_rect.x + 6.0, search_rect.y + 4.0),
+            FONT_SIZE - 2.0,
+            0.0,
+            search_color,
+        );
+
+        let query = self.search_query.to_lowercase();
+        let mut y = search_rect.y + search_rect.height + 10.0;
+        let files: Vec<_> = if query.is_empty() {
+            self.project.files.iter().collect()
+        } else {
+            self.project
+                .files
+                .iter()
+                .filter(|p| self.project.display_name(p).to_lowercase().contains(&query))
+                .collect()
+        };
+
+        for path in files {
             let display = self.project.display_name(path);
+            let rect = Rectangle {
+                x: 10.0,
+                y,
+                width: SIDEBAR_WIDTH - 20.0,
+                height: 22.0,
+            };
+            if point_in_rect(mouse, rect) {
+                d.draw_rectangle(
+                    rect.x as i32,
+                    rect.y as i32,
+                    rect.width as i32,
+                    rect.height as i32,
+                    COLOR_SIDEBAR_HIGHLIGHT,
+                );
+            }
             d.draw_text_ex(
                 font,
                 &display,
-                Vector2::new(14.0, y),
+                Vector2::new(rect.x + 4.0, y),
                 FONT_SIZE - 2.0,
                 0.0,
-                Color::new(210, 210, 220, 255),
+                COLOR_SIDEBAR_TEXT,
             );
             y += 24.0;
+        }
+
+        if !query.is_empty() {
+            y += 8.0;
+            d.draw_text_ex(
+                font,
+                "Matches",
+                Vector2::new(12.0, y),
+                FONT_SIZE - 2.0,
+                0.0,
+                COLOR_PROJECT,
+            );
+            y += 18.0;
+            for (def_name, def) in self
+                .project
+                .defs
+                .iter()
+                .filter(|(name, _)| name.to_lowercase().contains(&query))
+                .take(15)
+            {
+                let target = def.first().unwrap();
+                let rect = Rectangle {
+                    x: 10.0,
+                    y,
+                    width: SIDEBAR_WIDTH - 20.0,
+                    height: 20.0,
+                };
+                if point_in_rect(mouse, rect) {
+                    d.draw_rectangle(
+                        rect.x as i32,
+                        rect.y as i32,
+                        rect.width as i32,
+                        rect.height as i32,
+                        COLOR_SIDEBAR_HIGHLIGHT,
+                    );
+                }
+                let label = format!(
+                    "{} ({})",
+                    def_name,
+                    target.module_path
+                        .strip_prefix("crate::")
+                        .unwrap_or(&target.module_path)
+                );
+                d.draw_text_ex(
+                    font,
+                    &label,
+                    Vector2::new(rect.x + 4.0, y),
+                    FONT_SIZE - 4.0,
+                    0.0,
+                    COLOR_SIDEBAR_TEXT,
+                );
+                y += 20.0;
+            }
         }
     }
 
     fn draw_window(&self, d: &mut RaylibDrawHandle, font: &AppFont, idx: usize, is_top: bool) {
         let win = &self.windows[idx];
-        let bg = if is_top {
-            Color::new(40, 42, 58, 240)
-        } else {
-            Color::new(30, 30, 40, 220)
-        };
+        let bg = if is_top { COLOR_WINDOW_TOP } else { COLOR_WINDOW };
         d.draw_rectangle(
             win.position.x as i32,
             win.position.y as i32,
@@ -451,7 +744,7 @@ impl AppState {
             title_rect.y as i32,
             title_rect.width as i32,
             title_rect.height as i32,
-            Color::new(60, 64, 90, 255),
+            COLOR_TITLE,
         );
         d.draw_text_ex(
             font,
@@ -459,7 +752,7 @@ impl AppState {
             Vector2::new(title_rect.x + 8.0, title_rect.y + 8.0),
             FONT_SIZE,
             0.0,
-            Color::new(230, 230, 240, 255),
+            COLOR_TEXT,
         );
         let close_rect = Rectangle {
             x: title_rect.x + title_rect.width - 24.0,
@@ -472,7 +765,7 @@ impl AppState {
             close_rect.y as i32,
             close_rect.width as i32,
             close_rect.height as i32,
-            Color::new(230, 120, 120, 255),
+            COLOR_CLOSE,
         );
         d.draw_text_ex(
             font,
@@ -480,7 +773,7 @@ impl AppState {
             Vector2::new(close_rect.x + 3.0, close_rect.y - 1.0),
             FONT_SIZE,
             0.0,
-            Color::new(230, 120, 120, 255),
+            COLOR_CLOSE,
         );
 
         if let Some(pf) = self.project.parsed.get(&win.file) {
@@ -490,34 +783,36 @@ impl AppState {
 
     fn draw_code(&self, d: &mut RaylibDrawHandle, font: &AppFont, file: &ParsedFile, win: &CodeWindow) {
         let content_rect = win.content_rect();
+        let mut breadcrumb = self.project.display_name(&file.path);
+        if let Some(mod_path) = file.defs.first().map(|d| d.module_path.as_str()) {
+            breadcrumb.push_str(" · ");
+            breadcrumb.push_str(mod_path);
+        }
+        d.draw_text_ex(font, &breadcrumb, Vector2::new(content_rect.x + 8.0, content_rect.y + 2.0), FONT_SIZE - 2.0, 0.0, COLOR_BREADCRUMB);
+
+        let start_y = content_rect.y + BREADCRUMB_HEIGHT;
         let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
-        let lines_visible = ((content_rect.height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
+        let lines_visible =
+            ((content_rect.height - BREADCRUMB_HEIGHT + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
         let bottom = (top_visible + lines_visible + 1).min(file.lines.len());
-        let mut y = content_rect.y - (win.scroll % LINE_HEIGHT);
+        let mut y = start_y - (win.scroll % LINE_HEIGHT);
 
         for idx in top_visible..bottom {
             let line = &file.lines[idx];
             let text_start_x = content_rect.x + CODE_X_OFFSET;
-            let line_num_color = Color::new(90, 100, 130, 255);
             d.draw_text_ex(
                 font,
                 &format!("{:>4}", idx + 1),
                 Vector2::new(content_rect.x + 4.0, y),
                 FONT_SIZE - 2.0,
                 0.0,
-                line_num_color,
+                COLOR_LINE_NUM,
             );
 
             let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
             if calls.is_empty() {
-                d.draw_text_ex(
-                    font,
-                    line,
-                    Vector2::new(text_start_x, y),
-                    FONT_SIZE,
-                    0.0,
-                    Color::new(220, 220, 230, 255),
-                );
+                let segments = colorize_line(line, &[]);
+                draw_segments(d, font, text_start_x, y, &segments);
             } else {
                 self.draw_line_with_calls(d, font, line, text_start_x, y, &calls);
             }
@@ -535,26 +830,230 @@ impl AppState {
         y: f32,
         calls: &[&FunctionCall],
     ) {
-        let mut cursor = 0;
-        let mut x = base_x;
-        for call in calls {
-            if call.col > cursor {
-                let slice = &line[cursor..call.col];
-                if !slice.is_empty() {
-                    d.draw_text_ex(font, slice, Vector2::new(x, y), FONT_SIZE, 0.0, Color::new(220, 220, 230, 255));
-                    x += font.measure_text(slice, FONT_SIZE, 0.0).x;
+        let segments = colorize_line(line, calls);
+        draw_segments(d, font, base_x, y, &segments);
+    }
+}
+
+fn colorize_line(line: &str, calls: &[&FunctionCall]) -> Vec<(String, Color)> {
+    let mut segments: Vec<(String, Color)> = Vec::new();
+    let mut i = 0;
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut call_ranges: Vec<(usize, usize)> = calls.iter().map(|c| (c.col, c.len)).collect();
+    call_ranges.sort_by_key(|r| r.0);
+
+    while i < len {
+        if let Some(&(start, clen)) = call_ranges.iter().find(|&&(s, _)| s == i) {
+            let text = line[start..start + clen].to_string();
+            append_segment(&mut segments, text, COLOR_CALL);
+            i += clen;
+            continue;
+        }
+
+        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            let text = line[i..].to_string();
+            append_segment(&mut segments, text, COLOR_COMMENT);
+            break;
+        }
+
+        if bytes[i] == b'"' {
+            let start = i;
+            i += 1;
+            let mut escaped = false;
+            while i < len {
+                let b = bytes[i];
+                if b == b'\\' && !escaped {
+                    escaped = true;
+                    i += 1;
+                    continue;
+                }
+                if b == b'"' && !escaped {
+                    i += 1;
+                    break;
+                }
+                escaped = false;
+                i += 1;
+            }
+            let text = line[start..i].to_string();
+            append_segment(&mut segments, text, COLOR_STRING);
+            continue;
+        }
+
+        let b = bytes[i];
+        if b.is_ascii_alphabetic() || b == b'_' {
+            let start = i;
+            i += 1;
+            while i < len {
+                let b = bytes[i];
+                if b.is_ascii_alphanumeric() || b == b'_' {
+                    i += 1;
+                } else {
+                    break;
                 }
             }
-            let name = &line[call.col..call.col + call.len];
-            d.draw_text_ex(font, name, Vector2::new(x, y), FONT_SIZE, 0.0, Color::new(120, 200, 255, 255));
-            x += font.measure_text(name, FONT_SIZE, 0.0).x;
-            cursor = call.col + call.len;
+            let word = &line[start..i];
+            let color = if KEYWORDS.iter().any(|k| *k == word) {
+                COLOR_KEYWORD
+            } else {
+                COLOR_TEXT
+            };
+            append_segment(&mut segments, word.to_string(), color);
+            continue;
         }
-        if cursor < line.len() {
-            let slice = &line[cursor..];
-            d.draw_text_ex(font, slice, Vector2::new(x, y), FONT_SIZE, 0.0, Color::new(220, 220, 230, 255));
+
+        let ch = &line[i..i + 1];
+        append_segment(&mut segments, ch.to_string(), COLOR_TEXT);
+        i += 1;
+    }
+
+    segments
+}
+
+fn append_segment(segments: &mut Vec<(String, Color)>, text: String, color: Color) {
+    if text.is_empty() {
+        return;
+    }
+    if let Some((last_text, last_color)) = segments.last_mut() {
+        if last_color == &color {
+            last_text.push_str(&text);
+            return;
         }
     }
+    segments.push((text, color));
+}
+
+fn draw_segments(
+    d: &mut RaylibDrawHandle,
+    font: &AppFont,
+    base_x: f32,
+    y: f32,
+    segments: &[(String, Color)],
+) {
+    let mut x = base_x;
+    for (text, color) in segments {
+        d.draw_text_ex(font, text, Vector2::new(x, y), FONT_SIZE, 0.0, *color);
+        x += font.measure_text(text, FONT_SIZE, 0.0).x;
+    }
+}
+
+struct SyntaxCollector<'a> {
+    file: &'a Path,
+    source: &'a str,
+    defs: Vec<FunctionDef>,
+    calls: Vec<FunctionCall>,
+    module_stack: Vec<String>,
+    keywords: HashSet<&'static str>,
+}
+
+impl<'a> SyntaxCollector<'a> {
+    fn new(file: &'a Path, source: &'a str) -> Self {
+        let keywords: HashSet<&'static str> = KEYWORDS.into_iter().collect();
+
+        Self {
+            file,
+            source,
+            defs: Vec::new(),
+            calls: Vec::new(),
+            module_stack: Vec::new(),
+            keywords,
+        }
+    }
+
+    fn module_path(&self) -> String {
+        if self.module_stack.is_empty() {
+            "crate".to_string()
+        } else {
+            format!("crate::{}", self.module_stack.join("::"))
+        }
+    }
+
+    fn push_mod(&mut self, name: &str) {
+        self.module_stack.push(name.to_string());
+    }
+
+    fn pop_mod(&mut self) {
+        self.module_stack.pop();
+    }
+
+    fn add_def(&mut self, ident: &syn::Ident, span: Span) {
+        if let Some((line, col)) = span_to_line_col(span) {
+            self.defs.push(FunctionDef {
+                name: ident.to_string(),
+                module_path: self.module_path(),
+                line,
+                col,
+            });
+        }
+    }
+
+    fn add_call(&mut self, name: String, span: Span) {
+        if let Some((line, col)) = span_to_line_col(span) {
+            self.calls.push(FunctionCall {
+                name: name.clone(),
+                module_path: self.module_path(),
+                line,
+                col,
+                len: span_to_len(span, self.source).unwrap_or(name.len()),
+            });
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for SyntaxCollector<'_> {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        self.add_def(&node.sig.ident, node.sig.ident.span());
+        syn::visit::visit_item_fn(self, node);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        self.add_def(&node.sig.ident, node.sig.ident.span());
+        syn::visit::visit_impl_item_fn(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        self.push_mod(&node.ident.to_string());
+        syn::visit::visit_item_mod(self, node);
+        self.pop_mod();
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(ref path) = *node.func {
+            if let Some(segment) = path.path.segments.last() {
+                let name = segment.ident.to_string();
+                if !self.keywords.contains(name.as_str()) {
+                    self.add_call(name, segment.ident.span());
+                }
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        let name = node.method.to_string();
+        if !self.keywords.contains(name.as_str()) {
+            self.add_call(name, node.method.span());
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+}
+
+fn span_to_line_col(span: Span) -> Option<(usize, usize)> {
+    let start = span.start();
+    Some((start.line.saturating_sub(1), start.column))
+}
+
+fn span_to_len(span: Span, source: &str) -> Option<usize> {
+    let start = span.start();
+    let end = span.end();
+    if start.line != end.line {
+        return None;
+    }
+    let line_idx = start.line.saturating_sub(1);
+    let line = source.lines().nth(line_idx)?;
+    let start_idx = start.column.min(line.len());
+    let end_idx = end.column.min(line.len());
+    Some(end_idx.saturating_sub(start_idx))
 }
 
 fn main() -> Result<()> {
@@ -580,12 +1079,15 @@ fn main() -> Result<()> {
         let left_pressed = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let left_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
 
-        app.handle_input(&font, mouse, wheel, left_pressed, left_down);
+        let typed = collect_typed_chars(&mut rl);
+        let backspace = rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE);
+        app.handle_input(&font, mouse, wheel, left_pressed, left_down, typed, backspace);
 
         let mut d = rl.begin_drawing(&thread);
-        app.draw(&mut d, &font);
+        app.draw(&mut d, &font, mouse);
     }
 
+    app.save_layout().context("saving layout")?;
     Ok(())
 }
 
@@ -593,72 +1095,16 @@ fn parse_rust_file(path: &Path) -> Result<ParsedFile> {
     let content = std::fs::read_to_string(path)?;
     let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
-    let fn_re = Regex::new(r"(?m)^\s*(pub\s+)?(async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
-    let call_re = Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap();
-
-    let mut defs = Vec::new();
-    let mut calls = Vec::new();
-
-    for cap in fn_re.captures_iter(&content) {
-        if let Some(m) = cap.get(3) {
-            let (line, col) = offset_to_line_col(&content, m.start());
-            defs.push(FunctionDef {
-                name: m.as_str().to_string(),
-                line,
-                col,
-            });
-        }
-    }
-
-    let keywords: HashSet<&'static str> = [
-        "if", "else", "for", "while", "loop", "match", "fn", "pub", "impl", "struct", "enum",
-        "use", "let", "in", "where", "return",
-    ]
-    .into_iter()
-    .collect();
-
-    for (line_idx, line) in lines.iter().enumerate() {
-        for cap in call_re.captures_iter(line) {
-            if let Some(m) = cap.get(1) {
-                let name = m.as_str();
-                if keywords.contains(name) {
-                    continue;
-                }
-                calls.push(FunctionCall {
-                    name: name.to_string(),
-                    line: line_idx,
-                    col: m.start(),
-                    len: m.as_str().len(),
-                });
-            }
-        }
-    }
+    let file = syn::parse_file(&content)?;
+    let mut collector = SyntaxCollector::new(path, &content);
+    collector.visit_file(&file);
 
     Ok(ParsedFile {
         path: path.to_path_buf(),
         lines,
-        defs,
-        calls,
+        defs: collector.defs,
+        calls: collector.calls,
     })
-}
-
-fn offset_to_line_col(content: &str, offset: usize) -> (usize, usize) {
-    let mut line = 0;
-    let mut col = 0;
-    let mut count = 0;
-    for ch in content.chars() {
-        if count == offset {
-            break;
-        }
-        count += ch.len_utf8();
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
 }
 
 fn token_rect(
@@ -686,4 +1132,14 @@ fn point_in_rect(point: Vector2, rect: Rectangle) -> bool {
         && point.x <= rect.x + rect.width
         && point.y >= rect.y
         && point.y <= rect.y + rect.height
+}
+
+fn collect_typed_chars(rl: &mut RaylibHandle) -> String {
+    let mut out = String::new();
+    while let Some(ch) = rl.get_char_pressed() {
+        if !ch.is_control() {
+            out.push(ch);
+        }
+    }
+    out
 }
