@@ -4,6 +4,7 @@ use raylib::prelude::*;
 
 use crate::constants::{BREADCRUMB_HEIGHT, CODE_X_OFFSET, LINE_HEIGHT, TITLE_BAR_HEIGHT};
 use crate::model::{ParsedFile, ProjectModel};
+use crate::point_in_rect;
 
 pub const RESIZE_HANDLE: f32 = 14.0;
 pub const MIN_WINDOW_W: f32 = 320.0;
@@ -130,53 +131,43 @@ pub fn clamp_window_scroll(project: &ProjectModel, win: &mut CodeWindow) {
 }
 
 impl CodeWindow {
-    pub fn content_rect(&self) -> Rectangle {
+    pub fn rect_at(&self, offset: Vector2) -> Rectangle {
         Rectangle {
-            x: self.position.x,
-            y: self.position.y + TITLE_BAR_HEIGHT,
+            x: self.position.x + offset.x,
+            y: self.position.y + offset.y,
+            width: self.size.x,
+            height: self.size.y,
+        }
+    }
+
+    pub fn content_rect_at(&self, offset: Vector2) -> Rectangle {
+        Rectangle {
+            x: self.position.x + offset.x,
+            y: self.position.y + TITLE_BAR_HEIGHT + offset.y,
             width: self.size.x,
             height: self.size.y - TITLE_BAR_HEIGHT,
         }
     }
 
-    pub fn title_rect(&self) -> Rectangle {
+    pub fn title_rect_at(&self, offset: Vector2) -> Rectangle {
         Rectangle {
-            x: self.position.x,
-            y: self.position.y,
+            x: self.position.x + offset.x,
+            y: self.position.y + offset.y,
             width: self.size.x,
             height: TITLE_BAR_HEIGHT,
         }
     }
 
-    pub fn resize_handle_rect(&self) -> Rectangle {
-        Rectangle {
-            x: self.position.x + self.size.x - RESIZE_HANDLE,
-            y: self.position.y + self.size.y - RESIZE_HANDLE,
-            width: RESIZE_HANDLE,
-            height: RESIZE_HANDLE,
-        }
-    }
-
-    pub fn v_scroll_rect(&self, metrics: &ContentMetrics) -> Rectangle {
-        Rectangle {
-            x: self.position.x + self.size.x - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
-            y: self.position.y + TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT,
-            width: SCROLLBAR_THICKNESS,
-            height: metrics.avail_height,
-        }
-    }
-
-    pub fn h_scroll_rect(&self, metrics: &ContentMetrics) -> Rectangle {
-        Rectangle {
-            x: self.position.x + CODE_X_OFFSET,
-            y: self.position.y + self.size.y - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
-            width: metrics.avail_width,
-            height: SCROLLBAR_THICKNESS,
-        }
-    }
-
     pub fn minimap_rect(&self, metrics: &ContentMetrics) -> Option<Rectangle> {
-        let content = self.content_rect();
+        self.minimap_rect_at(metrics, Vector2::new(0.0, 0.0))
+    }
+
+    pub fn minimap_rect_at(
+        &self,
+        metrics: &ContentMetrics,
+        offset: Vector2,
+    ) -> Option<Rectangle> {
+        let content = self.content_rect_at(offset);
         let gutter = if metrics.show_v {
             SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
         } else {
@@ -199,11 +190,26 @@ impl CodeWindow {
         })
     }
 
-    pub fn hit_resize_edges(&self, mouse: Vector2) -> Option<(bool, bool, bool, bool)> {
+    pub fn hit_test(&self, mouse: Vector2) -> bool {
         let margin = RESIZE_HANDLE * 0.6;
         let rect = Rectangle {
             x: self.position.x - margin / 2.0,
             y: self.position.y - margin / 2.0,
+            width: self.size.x + margin,
+            height: self.size.y + margin,
+        };
+        point_in_rect(mouse, rect)
+    }
+
+    pub fn hit_resize_edges(
+        &self,
+        mouse: Vector2,
+        offset: Vector2,
+    ) -> Option<(bool, bool, bool, bool)> {
+        let margin = RESIZE_HANDLE * 0.6;
+        let rect = Rectangle {
+            x: self.position.x + offset.x - margin / 2.0,
+            y: self.position.y + offset.y - margin / 2.0,
             width: self.size.x + margin,
             height: self.size.y + margin,
         };

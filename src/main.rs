@@ -79,6 +79,8 @@ fn main() -> Result<()> {
         let wheel = rl.get_mouse_wheel_move();
         let left_pressed = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let left_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
+        let middle_pressed = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_MIDDLE);
+        let middle_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_MIDDLE);
         let shift_down = rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
             || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
 
@@ -90,6 +92,8 @@ fn main() -> Result<()> {
             wheel,
             left_pressed,
             left_down,
+            middle_pressed,
+            middle_down,
             typed,
             backspace,
             shift_down,

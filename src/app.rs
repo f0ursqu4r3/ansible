@@ -57,6 +57,10 @@ pub struct AppState {
     pub sidebar: SidebarState,
     pub palette: Palette,
     icons: Icons,
+    pan: Vector2,
+    pan_dragging: bool,
+    pan_anchor: Vector2,
+    pan_start: Vector2,
 }
 
 impl AppState {
@@ -74,6 +78,10 @@ impl AppState {
             sidebar: SidebarState::with_icons(rl, thread),
             palette,
             icons,
+            pan: Vector2::new(0.0, 0.0),
+            pan_dragging: false,
+            pan_anchor: Vector2::new(0.0, 0.0),
+            pan_start: Vector2::new(0.0, 0.0),
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -251,11 +259,31 @@ impl AppState {
         wheel: f32,
         left_pressed: bool,
         left_down: bool,
+        middle_pressed: bool,
+        middle_down: bool,
         typed: String,
         backspace: bool,
         shift_down: bool,
         sidebar_height: f32,
     ) {
+        let world_mouse = Vector2::new(mouse.x - self.pan.x, mouse.y - self.pan.y);
+
+        if middle_pressed {
+            self.pan_dragging = true;
+            self.pan_anchor = mouse;
+            self.pan_start = self.pan;
+        }
+        if !middle_down {
+            self.pan_dragging = false;
+        }
+
+        if self.pan_dragging {
+            let dx = mouse.x - self.pan_anchor.x;
+            let dy = mouse.y - self.pan_anchor.y;
+            self.pan = Vector2::new(self.pan_start.x + dx, self.pan_start.y + dy);
+            return;
+        }
+
         if !left_down {
             for w in &mut self.windows {
                 w.is_dragging = false;
@@ -278,7 +306,7 @@ impl AppState {
                 return;
             }
             for idx in (0..self.windows.len()).rev() {
-                let content = self.windows[idx].content_rect();
+                let content = self.windows[idx].content_rect_at(self.pan);
                 if point_in_rect(mouse, content) {
                     if shift_down {
                         let max_x = {
@@ -302,19 +330,22 @@ impl AppState {
         if left_down {
             for w in &mut self.windows {
                 if w.is_dragging {
-                    w.position = Vector2::new(mouse.x - w.drag_offset.x, mouse.y - w.drag_offset.y);
+                    w.position = Vector2::new(
+                        world_mouse.x - w.drag_offset.x,
+                        world_mouse.y - w.drag_offset.y,
+                    );
                 }
                 if w.is_resizing {
                     let (left, right, top, bottom) = w.resize_edges;
                     let mut new_pos = w.resize_origin_pos;
                     let mut new_size = w.resize_origin_size;
-                    let dx = mouse.x - w.drag_start.x;
-                    let dy = mouse.y - w.drag_start.y;
+                    let dx = world_mouse.x - w.drag_start.x;
+                    let dy = world_mouse.y - w.drag_start.y;
                     if left {
                         let max_x = w.resize_origin_pos.x + w.resize_origin_size.x - MIN_WINDOW_W;
                         let nx = (w.resize_origin_pos.x + dx).min(max_x);
-                        new_size.x = (w.resize_origin_pos.x + w.resize_origin_size.x - nx)
-                            .max(MIN_WINDOW_W);
+                        new_size.x =
+                            (w.resize_origin_pos.x + w.resize_origin_size.x - nx).max(MIN_WINDOW_W);
                         new_pos.x = nx;
                     }
                     if right {
@@ -323,8 +354,8 @@ impl AppState {
                     if top {
                         let max_y = w.resize_origin_pos.y + w.resize_origin_size.y - MIN_WINDOW_H;
                         let ny = (w.resize_origin_pos.y + dy).min(max_y);
-                        new_size.y = (w.resize_origin_pos.y + w.resize_origin_size.y - ny)
-                            .max(MIN_WINDOW_H);
+                        new_size.y =
+                            (w.resize_origin_pos.y + w.resize_origin_size.y - ny).max(MIN_WINDOW_H);
                         new_pos.y = ny;
                     }
                     if bottom {
@@ -336,7 +367,8 @@ impl AppState {
                 }
                 if w.dragging_vscroll {
                     if let Some(metrics) = code_window::metrics_for(&self.project, w) {
-                        let track_y = w.position.y + TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT;
+                        let track_y =
+                            w.position.y + self.pan.y + TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT;
                         let track_h = metrics.avail_height;
                         if track_h > 0.0 {
                             let thumb_h = (metrics.avail_height / metrics.total_height.max(1.0)
@@ -352,7 +384,7 @@ impl AppState {
                 }
                 if w.dragging_hscroll {
                     if let Some(metrics) = code_window::metrics_for(&self.project, w) {
-                        let track_x = w.position.x + CODE_X_OFFSET;
+                        let track_x = w.position.x + self.pan.x + CODE_X_OFFSET;
                         let track_w = metrics.avail_width;
                         if track_w > 0.0 {
                             let thumb_w = (metrics.avail_width / metrics.max_width.max(1.0)
@@ -368,7 +400,7 @@ impl AppState {
                 }
                 if w.dragging_minimap {
                     if let Some(metrics) = code_window::metrics_for(&self.project, w) {
-                        if let Some(mini) = w.minimap_rect(&metrics) {
+                        if let Some(mini) = w.minimap_rect_at(&metrics, self.pan) {
                             let ratio = ((mouse.y - mini.y) / mini.height).clamp(0.0, 1.0);
                             let scroll_range = metrics.max_scroll_y();
                             w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
@@ -376,7 +408,7 @@ impl AppState {
                     }
                 }
                 if !w.is_resizing {
-                    w.hover_edges = w.hit_resize_edges(mouse);
+                    w.hover_edges = w.hit_resize_edges(mouse, self.pan);
                 }
             }
         }
@@ -384,7 +416,7 @@ impl AppState {
         if left_pressed {
             let mut handled = false;
             for idx in (0..self.windows.len()).rev() {
-                if self.window_hit_test(idx, mouse) {
+                if self.windows[idx].hit_test(world_mouse) {
                     self.bring_to_front(idx);
                     let top_idx = self.windows.len() - 1;
                     let action = self.handle_window_click(font, top_idx, mouse);
@@ -408,7 +440,7 @@ impl AppState {
                                 win.resize_origin_pos = win.position;
                                 win.resize_origin_size = win.size;
                                 win.resize_edges = edges;
-                                win.drag_start = mouse;
+                                win.drag_start = world_mouse;
                                 win.is_dragging = false;
                                 win.hover_edges = Some(edges);
                             }
@@ -512,7 +544,7 @@ impl AppState {
                 if !can_hover {
                     continue;
                 }
-                let edges = self.windows[idx].hit_resize_edges(mouse);
+                let edges = self.windows[idx].hit_resize_edges(mouse, self.pan);
                 if let Some(edges) = edges {
                     if let Some(w) = self.windows.get_mut(idx) {
                         w.hover_edges = Some(edges);
@@ -523,17 +555,6 @@ impl AppState {
         }
     }
 
-    fn window_hit_test(&self, idx: usize, mouse: Vector2) -> bool {
-        let win = &self.windows[idx];
-        let rect = Rectangle {
-            x: win.position.x,
-            y: win.position.y,
-            width: win.size.x,
-            height: win.size.y,
-        };
-        point_in_rect(mouse, rect)
-    }
-
     fn max_scroll(&self, idx: usize) -> f32 {
         code_window::metrics_for(&self.project, &self.windows[idx])
             .map(|m| m.max_scroll_y())
@@ -541,16 +562,8 @@ impl AppState {
     }
 
     pub fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
-        d.clear_background(self.palette.bg);
-        self.sidebar.draw(
-            d,
-            font,
-            mouse,
-            &self.project,
-            &self.project.defs,
-            &self.palette,
-        );
         let mut hover_cursor: Option<MouseCursor> = None;
+        d.clear_background(self.palette.bg);
         for idx in 0..self.windows.len() {
             if let Some(edges) = self.windows[idx].hover_edges {
                 hover_cursor = Some(cursor_for_edges(edges));
@@ -559,6 +572,14 @@ impl AppState {
             self.draw_window(d, font, idx, is_top);
         }
         d.set_mouse_cursor(hover_cursor.unwrap_or(MouseCursor::MOUSE_CURSOR_DEFAULT));
+        self.sidebar.draw(
+            d,
+            font,
+            mouse,
+            &self.project,
+            &self.project.defs,
+            &self.palette,
+        );
     }
 
     fn draw_window(&self, d: &mut RaylibDrawHandle, font: &AppFont, idx: usize, is_top: bool) {
@@ -569,30 +590,11 @@ impl AppState {
             self.palette.window
         };
         let radius = 0.01;
-        d.draw_rectangle_rounded(
-            Rectangle {
-                x: win.position.x,
-                y: win.position.y,
-                width: win.size.x,
-                height: win.size.y,
-            },
-            radius,
-            10,
-            bg,
-        );
-        d.draw_rectangle_rounded_lines(
-            Rectangle {
-                x: win.position.x,
-                y: win.position.y,
-                width: win.size.x,
-                height: win.size.y,
-            },
-            radius,
-            10,
-            self.palette.breadcrumb,
-        );
+        let win_rect = win.rect_at(self.pan);
+        d.draw_rectangle_rounded(win_rect, radius, 10, bg);
+        d.draw_rectangle_rounded_lines(win_rect, radius, 10, self.palette.breadcrumb);
 
-        let title_rect = win.title_rect();
+        let title_rect = win.title_rect_at(self.pan);
         d.draw_rectangle_rounded(
             Rectangle {
                 x: title_rect.x,
@@ -629,7 +631,6 @@ impl AppState {
         if let Some(pf) = self.project.parsed.get(&win.file) {
             self.draw_code(d, font, pf, win);
         }
-
     }
 
     fn draw_code(
@@ -639,7 +640,7 @@ impl AppState {
         file: &ParsedFile,
         win: &CodeWindow,
     ) {
-        let content_rect = win.content_rect();
+        let content_rect = win.content_rect_at(self.pan);
         if content_rect.width <= 0.0 || content_rect.height <= 0.0 {
             return;
         }
@@ -721,7 +722,7 @@ impl AppState {
         }
         drop(scoped);
 
-        if let Some(mini) = win.minimap_rect(&metrics) {
+        if let Some(mini) = win.minimap_rect_at(&metrics, self.pan) {
             d.draw_rectangle(
                 mini.x as i32,
                 mini.y as i32,
@@ -849,8 +850,9 @@ impl AppState {
     }
 
     fn handle_window_click(&mut self, font: &AppFont, idx: usize, mouse: Vector2) -> WindowAction {
+        let world_mouse = Vector2::new(mouse.x - self.pan.x, mouse.y - self.pan.y);
         let win = &self.windows[idx];
-        let title_rect = win.title_rect();
+        let title_rect = win.title_rect_at(self.pan);
         let icon_size = self.icons.size() as f32;
         let close_rect = Rectangle {
             x: title_rect.x + title_rect.width - icon_size - 8.0,
@@ -863,25 +865,25 @@ impl AppState {
             return WindowAction::Close;
         }
 
-        if let Some(edges) = win.hit_resize_edges(mouse) {
+        if let Some(edges) = win.hit_resize_edges(mouse, self.pan) {
             return WindowAction::StartResize { edges };
         }
 
         if point_in_rect(mouse, title_rect) {
             return WindowAction::StartDrag(Vector2 {
-                x: mouse.x - win.position.x,
-                y: mouse.y - win.position.y,
+                x: world_mouse.x - win.position.x,
+                y: world_mouse.y - win.position.y,
             });
         }
 
-        let content_rect = win.content_rect();
+        let content_rect = win.content_rect_at(self.pan);
         if !point_in_rect(mouse, content_rect) {
             return WindowAction::None;
         }
 
         if let Some(pf) = self.project.parsed.get(&win.file) {
             let metrics = code_window::content_metrics(pf, win);
-            if let Some(mini) = win.minimap_rect(&metrics) {
+            if let Some(mini) = win.minimap_rect_at(&metrics, self.pan) {
                 if point_in_rect(mouse, mini) {
                     let ratio = ((mouse.y - mini.y) / mini.height).clamp(0.0, 1.0);
                     return WindowAction::StartMinimap { ratio };
@@ -988,7 +990,7 @@ impl AppState {
         win: &CodeWindow,
         mouse: Vector2,
     ) -> Option<DefinitionLocation> {
-        let content_rect = win.content_rect();
+        let content_rect = win.content_rect_at(self.pan);
         let content_top = content_rect.y + BREADCRUMB_HEIGHT;
         let local_y = mouse.y - content_top + win.scroll;
         if local_y < 0.0 {
