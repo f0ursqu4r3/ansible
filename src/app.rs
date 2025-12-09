@@ -9,6 +9,7 @@ use crate::code_window::{
 use crate::constants::{
     BREADCRUMB_HEIGHT, CODE_X_OFFSET, LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_WIDTH, TITLE_BAR_HEIGHT,
 };
+use crate::icons::{Icon, Icons};
 use crate::helpers::matches_view;
 use crate::model::{
     colorize_line, find_function_span, DefinitionLocation, FunctionCall, ParsedFile, ProjectModel,
@@ -51,16 +52,19 @@ pub struct AppState {
     pub next_window_id: usize,
     pub sidebar: SidebarState,
     pub palette: Palette,
+    icons: Icons,
 }
 
 impl AppState {
     pub fn new(project: ProjectModel, rl: &mut RaylibHandle, thread: &RaylibThread, palette: Palette) -> Self {
+        let icons = Icons::load(rl, thread, 16);
         let mut state = Self {
             project,
             windows: Vec::new(),
             next_window_id: 1,
             sidebar: SidebarState::with_icons(rl, thread),
             palette,
+            icons,
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -512,25 +516,17 @@ impl AppState {
             0.0,
             self.palette.text,
         );
+        let icon_size = self.icons.size() as f32;
         let close_rect = Rectangle {
-            x: title_rect.x + title_rect.width - 24.0,
-            y: title_rect.y + 6.0,
-            width: 16.0,
-            height: 16.0,
+            x: title_rect.x + title_rect.width - icon_size - 8.0,
+            y: title_rect.y + (TITLE_BAR_HEIGHT - icon_size) * 0.5,
+            width: icon_size,
+            height: icon_size,
         };
-        d.draw_rectangle_lines(
-            close_rect.x as i32,
-            close_rect.y as i32,
-            close_rect.width as i32,
-            close_rect.height as i32,
-            self.palette.close,
-        );
-        font.draw_text_ex(
+        self.icons.render(
             d,
-            "x",
-            Vector2::new(close_rect.x + 3.0, close_rect.y - 1.0),
-            FONT_SIZE,
-            0.0,
+            Icon::Close,
+            Vector2::new(close_rect.x, close_rect.y),
             self.palette.close,
         );
 
@@ -603,6 +599,15 @@ impl AppState {
         let bottom = (top_visible + lines_visible + 1).min(file.lines.len());
         let mut y = start_y - (win.scroll % LINE_HEIGHT);
 
+        let gutter_width = CODE_X_OFFSET - 4.0;
+        scoped.draw_rectangle(
+            content_rect.x as i32,
+            start_y as i32,
+            gutter_width as i32,
+            (metrics.avail_height + LINE_HEIGHT) as i32,
+            self.palette.window,
+        );
+
         for idx in top_visible..bottom {
             let line = &file.lines[idx];
             let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
@@ -629,60 +634,61 @@ impl AppState {
         drop(scoped);
 
         if let Some(mini) = win.minimap_rect(&metrics) {
-            let bg = Color {
-                r: self.palette.search_bg.r,
-                g: self.palette.search_bg.g,
-                b: self.palette.search_bg.b,
-                a: 140,
-            };
             d.draw_rectangle(
                 mini.x as i32,
                 mini.y as i32,
                 mini.width as i32,
                 mini.height as i32,
-                bg,
+                self.palette.window,
             );
             let scale = mini.height / metrics.total_height.max(1.0);
-            let line_scale = scale * LINE_HEIGHT;
-            let mini_font = (line_scale * 0.9).clamp(6.0, FONT_SIZE);
-            {
-                let mut scoped = d.begin_scissor_mode(
-                    mini.x as i32,
-                    mini.y as i32,
-                    mini.width as i32,
-                    mini.height as i32,
-                );
-                for (idx, line) in file.lines.iter().enumerate() {
-                    let line_y = mini.y + idx as f32 * line_scale;
-                    if line_y > mini.y + mini.height {
-                        break;
+            let line_scale = (scale * LINE_HEIGHT).max(1.0);
+            let block_height = (line_scale * 0.7).clamp(1.0, line_scale);
+            let max_width = (mini.width - 4.0).max(1.0);
+            let mut scoped = d.begin_scissor_mode(
+                mini.x as i32,
+                mini.y as i32,
+                mini.width as i32,
+                mini.height as i32,
+            );
+            for (idx, line) in file.lines.iter().enumerate() {
+                let line_y = mini.y + idx as f32 * line_scale;
+                if line_y > mini.y + mini.height {
+                    break;
+                }
+                let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
+                let segments = colorize_line(line, &calls);
+                let mut x = mini.x + 2.0;
+                for (text, color) in segments {
+                    let width = font
+                        .measure_width(&text, FONT_SIZE, 0.0)
+                        .max(text.len() as f32 * 4.0);
+                    let w = (width / metrics.max_width.max(1.0)) * max_width;
+                    if w <= 0.5 {
+                        continue;
                     }
-                    let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
-                    let segments = colorize_line(line, &calls);
-                    let mut x = mini.x + 2.0;
-                    for (text, color) in segments {
-                        let c = match color {
-                            ColorKind::Text => self.palette.text,
-                            ColorKind::Comment => self.palette.comment,
-                            ColorKind::String => self.palette.string,
-                            ColorKind::Keyword => self.palette.keyword,
-                            ColorKind::Call => self.palette.call,
-                        };
-                        font.draw_text_ex(
-                            &mut scoped,
-                            &text,
-                            Vector2::new(x, line_y),
-                            mini_font,
-                            0.0,
-                            c,
-                        );
-                        x += font.measure_width(&text, mini_font, 0.0);
-                        if x > mini.x + mini.width - 2.0 {
-                            break;
-                        }
+                    let c = match color {
+                        ColorKind::Text => self.palette.text,
+                        ColorKind::Comment => self.palette.comment,
+                        ColorKind::String => self.palette.string,
+                        ColorKind::Keyword => self.palette.keyword,
+                        ColorKind::Call => self.palette.call,
+                    };
+                    scoped.draw_rectangle(
+                        x as i32,
+                        line_y as i32,
+                        w as i32,
+                        block_height as i32,
+                        c,
+                    );
+                    x += w;
+                    if x > mini.x + mini.width - 2.0 {
+                        break;
                     }
                 }
             }
+            drop(scoped);
+
             let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
             let view_y = mini.y + win.scroll * scale;
             d.draw_rectangle(
@@ -755,11 +761,12 @@ impl AppState {
     fn handle_window_click(&mut self, font: &AppFont, idx: usize, mouse: Vector2) -> WindowAction {
         let win = &self.windows[idx];
         let title_rect = win.title_rect();
+        let icon_size = self.icons.size() as f32;
         let close_rect = Rectangle {
-            x: title_rect.x + title_rect.width - 24.0,
-            y: title_rect.y + 6.0,
-            width: 16.0,
-            height: 16.0,
+            x: title_rect.x + title_rect.width - icon_size - 8.0,
+            y: title_rect.y + (TITLE_BAR_HEIGHT - icon_size) * 0.5,
+            width: icon_size,
+            height: icon_size,
         };
 
         if point_in_rect(mouse, close_rect) {

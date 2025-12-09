@@ -70,12 +70,11 @@ pub fn metrics_for(project: &ProjectModel, win: &CodeWindow) -> Option<ContentMe
 
 pub fn content_metrics(pf: &ParsedFile, win: &CodeWindow) -> ContentMetrics {
     let base_width = (win.size.x - CODE_X_OFFSET - RIGHT_TEXT_PAD).max(32.0);
-    let base_height = (win.size.y - TITLE_BAR_HEIGHT - BREADCRUMB_HEIGHT - CONTENT_PADDING)
-        .max(LINE_HEIGHT);
-    let max_width = pf
-        .lines
-        .iter()
-        .fold(0.0f32, |acc, line| acc.max(crate::estimated_line_width(line)));
+    let base_height =
+        (win.size.y - TITLE_BAR_HEIGHT - BREADCRUMB_HEIGHT - CONTENT_PADDING).max(LINE_HEIGHT);
+    let max_width = pf.lines.iter().fold(0.0f32, |acc, line| {
+        acc.max(crate::estimated_line_width(line))
+    });
     let total_height = pf.lines.len() as f32 * LINE_HEIGHT;
 
     let mut avail_width = base_width;

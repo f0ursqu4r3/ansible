@@ -7,6 +7,7 @@ mod app;
 mod code_window;
 mod constants;
 mod helpers;
+mod icons;
 mod model;
 mod sidebar;
 mod theme;
