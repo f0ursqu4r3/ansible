@@ -4,15 +4,34 @@
       "file": "src\\app.rs",
       "view_kind": null,
       "position": [
-        284.0,
-        68.0
+        246.0,
+        77.0
       ],
       "size": [
-        793.0,
-        614.0
+        1000.0,
+        693.0
       ],
-      "scroll": 0.0,
+      "scroll": 1305.5999,
       "scroll_x": 0.0
+    },
+    {
+      "file": "src\\app.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 90,
+        "end": 151,
+        "title": "crate"
+      },
+      "position": [
+        250.0,
+        26.0
+      ],
+      "size": [
+        720.0,
+        746.0
+      ],
+      "scroll": 1975.9996,
+      "scroll_x": 172.79999
     }
   ],
   "sidebar_scroll": 0.0,

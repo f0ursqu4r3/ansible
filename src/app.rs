@@ -487,6 +487,40 @@ impl AppState {
                 self.sidebar.search_query.push_str(&typed);
             }
         }
+
+        let resizing_idx = self.windows.iter().position(|w| w.is_resizing);
+        if let Some(active_idx) = resizing_idx {
+            for (i, w) in self.windows.iter_mut().enumerate() {
+                if i == active_idx {
+                    w.hover_edges = Some(w.resize_edges);
+                } else {
+                    w.hover_edges = None;
+                }
+            }
+        } else {
+            for w in &mut self.windows {
+                w.hover_edges = None;
+            }
+            for idx in (0..self.windows.len()).rev() {
+                let can_hover = {
+                    let w = &self.windows[idx];
+                    !w.is_dragging
+                        && !w.dragging_vscroll
+                        && !w.dragging_hscroll
+                        && !w.dragging_minimap
+                };
+                if !can_hover {
+                    continue;
+                }
+                let edges = self.windows[idx].hit_resize_edges(mouse);
+                if let Some(edges) = edges {
+                    if let Some(w) = self.windows.get_mut(idx) {
+                        w.hover_edges = Some(edges);
+                    }
+                    break;
+                }
+            }
+        }
     }
 
     fn window_hit_test(&self, idx: usize, mouse: Vector2) -> bool {

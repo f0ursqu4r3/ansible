@@ -200,20 +200,35 @@ impl CodeWindow {
     }
 
     pub fn hit_resize_edges(&self, mouse: Vector2) -> Option<(bool, bool, bool, bool)> {
-        let margin = RESIZE_HANDLE;
+        let margin = RESIZE_HANDLE * 0.6;
         let rect = Rectangle {
-            x: self.position.x,
-            y: self.position.y,
-            width: self.size.x,
-            height: self.size.y,
+            x: self.position.x - margin / 2.0,
+            y: self.position.y - margin / 2.0,
+            width: self.size.x + margin,
+            height: self.size.y + margin,
         };
         if unsafe { !raylib::ffi::CheckCollisionPointRec(mouse.into(), rect.into()) } {
             return None;
         }
-        let near_left = mouse.x < rect.x + margin;
-        let near_right = mouse.x > rect.x + rect.width - margin;
-        let near_top = mouse.y < rect.y + margin;
-        let near_bottom = mouse.y > rect.y + rect.height - margin;
+        let inset_rect = Rectangle {
+            x: rect.x + margin / 2.0,
+            y: rect.y + margin / 2.0,
+            width: (rect.width - margin).max(0.0),
+            height: (rect.height - margin).max(0.0),
+        };
+        let near_left = mouse.x >= rect.x && mouse.x < rect.x + margin;
+        let near_right = mouse.x <= rect.x + rect.width && mouse.x > rect.x + rect.width - margin;
+        let near_top = mouse.y >= rect.y && mouse.y < rect.y + margin;
+        let near_bottom =
+            mouse.y <= rect.y + rect.height && mouse.y > rect.y + rect.height - margin;
+
+        // Avoid corners spilling into opposite edges by preferring corner combos.
+        let corner = (near_left || near_right) && (near_top || near_bottom);
+        if !corner
+            && unsafe { raylib::ffi::CheckCollisionPointRec(mouse.into(), inset_rect.into()) }
+        {
+            return None;
+        }
         if near_left || near_right || near_top || near_bottom {
             return Some((near_left, near_right, near_top, near_bottom));
         }
