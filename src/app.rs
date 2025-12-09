@@ -51,6 +51,8 @@ struct SavedLayout {
     windows: Vec<SavedWindow>,
     #[serde(default)]
     sidebar_scroll: f32,
+    #[serde(default)]
+    sidebar_collapsed: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -97,6 +99,11 @@ impl AppState {
         };
         if let Ok(layout) = serde_json::from_str::<SavedLayout>(&text) {
             self.sidebar.scroll = layout.sidebar_scroll;
+            self.sidebar.collapsed_dirs = layout
+                .sidebar_collapsed
+                .into_iter()
+                .map(PathBuf::from)
+                .collect();
             for saved in layout.windows {
                 let file = self.project.root.join(&saved.file);
                 if !self.project.parsed.contains_key(&file) {
@@ -159,9 +166,18 @@ impl AppState {
                 scroll_x: w.scroll_x,
             })
             .collect();
+        let mut sidebar_collapsed: Vec<String> = self
+            .sidebar
+            .collapsed_dirs
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        sidebar_collapsed.sort();
+        sidebar_collapsed.dedup();
         let layout = SavedLayout {
             windows,
             sidebar_scroll: self.sidebar.scroll,
+            sidebar_collapsed,
         };
         let path = self.layout_path();
         let text = serde_json::to_string_pretty(&layout)?;
@@ -262,7 +278,7 @@ impl AppState {
         if wheel.abs() > f32::EPSILON {
             if self
                 .sidebar
-                .handle_wheel(mouse, wheel, &self.project, sidebar_height)
+                .handle_wheel(mouse, wheel, &self.project, &self.project.defs, sidebar_height)
             {
                 return;
             }
@@ -324,11 +340,14 @@ impl AppState {
             }
 
             if !handled {
-                if let Some(SidebarAction::OpenFile { path, line }) =
+                if let Some(action) =
                     self.sidebar
                         .handle_click(mouse, &self.project, &self.project.defs)
                 {
-                    self.open_file(path, line);
+                    match action {
+                        SidebarAction::OpenFile { path, line } => self.open_file(path, line),
+                        SidebarAction::ToggleDir => {}
+                    }
                     handled = true;
                 }
             }

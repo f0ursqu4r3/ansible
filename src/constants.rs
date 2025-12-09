@@ -1,5 +1,5 @@
-pub const FONT_SIZE: f32 = 10.0;
-pub const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
+pub const FONT_SIZE: f32 = 16.0;
+pub const LINE_HEIGHT: f32 = FONT_SIZE * 1.2;
 pub const TITLE_BAR_HEIGHT: f32 = 32.0;
 pub const SIDEBAR_WIDTH: f32 = 260.0;
 pub const CODE_X_OFFSET: f32 = 52.0;

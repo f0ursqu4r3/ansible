@@ -58,17 +58,10 @@ pub fn default_palette() -> Palette {
 }
 
 pub fn load_tmtheme_palette() -> Option<Palette> {
-    let theme_path = env::var("TM_THEME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            let p = PathBuf::from("data/theme.tmtheme");
-            if p.exists() {
-                Some(p)
-            } else {
-                None
-            }
-        })?;
+    let theme_path = env::var("TM_THEME").ok().map(PathBuf::from).or_else(|| {
+        let p = PathBuf::from("data/themes/Tomorrow-Night-Eighties.tmtheme");
+        if p.exists() { Some(p) } else { None }
+    })?;
     let data = fs::read(theme_path).ok()?;
     let plist = PlistValue::from_reader_xml(&*data).ok()?;
     let plist_dict = plist.as_dictionary()?;
@@ -79,10 +72,7 @@ pub fn load_tmtheme_palette() -> Option<Palette> {
     for item in settings {
         let dict = item.as_dictionary()?;
         let setting_values = dict.get("settings")?.as_dictionary()?;
-        let scope = dict
-            .get("scope")
-            .and_then(|v| v.as_string())
-            .unwrap_or("");
+        let scope = dict.get("scope").and_then(|v| v.as_string()).unwrap_or("");
         if scope.is_empty() {
             if let Some(bg) = setting_values
                 .get("background")

@@ -142,6 +142,7 @@ pub fn collect_typed_chars(rl: &mut RaylibHandle) -> String {
 pub fn load_monospace_font(rl: &mut RaylibHandle, thread: &RaylibThread) -> AppFont {
     let candidates = vec![
         env::var("TRACE_VIEWER_FONT").ok(),
+        Some("data/fonts/MonaspaceNeon-Regular.otf".to_string()),
         Some("data/fonts/PressStart2P-Regular.ttf".to_string()),
         Some("C:\\Windows\\Fonts\\Consola.ttf".to_string()),
         Some("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf".to_string()),
