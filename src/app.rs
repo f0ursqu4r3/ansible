@@ -9,14 +9,14 @@ use crate::code_window::{
 use crate::constants::{
     BREADCRUMB_HEIGHT, CODE_X_OFFSET, LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_WIDTH, TITLE_BAR_HEIGHT,
 };
-use crate::icons::{Icon, Icons};
 use crate::helpers::matches_view;
+use crate::icons::{Icon, Icons};
 use crate::model::{
-    colorize_line, find_function_span, DefinitionLocation, FunctionCall, ParsedFile, ProjectModel,
+    DefinitionLocation, FunctionCall, ParsedFile, ProjectModel, colorize_line, find_function_span,
 };
 use crate::sidebar::{SidebarAction, SidebarState};
 use crate::theme::{ColorKind, Palette};
-use crate::{point_in_rect, token_rect, AppFont, FONT_SIZE};
+use crate::{AppFont, FONT_SIZE, point_in_rect, token_rect};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -43,7 +43,11 @@ struct SavedLayout {
 #[serde(tag = "type")]
 enum SavedViewKind {
     FullFile,
-    SingleFn { start: usize, end: usize, title: String },
+    SingleFn {
+        start: usize,
+        end: usize,
+        title: String,
+    },
 }
 
 pub struct AppState {
@@ -56,7 +60,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(project: ProjectModel, rl: &mut RaylibHandle, thread: &RaylibThread, palette: Palette) -> Self {
+    pub fn new(
+        project: ProjectModel,
+        rl: &mut RaylibHandle,
+        thread: &RaylibThread,
+        palette: Palette,
+    ) -> Self {
         let icons = Icons::load(rl, thread, 16);
         let mut state = Self {
             project,
@@ -102,7 +111,11 @@ impl AppState {
                     .unwrap_or("file")
                     .to_string();
                 let view_kind = match saved.view_kind {
-                    Some(SavedViewKind::SingleFn { start, end, title: t }) => {
+                    Some(SavedViewKind::SingleFn {
+                        start,
+                        end,
+                        title: t,
+                    }) => {
                         title = t;
                         CodeViewKind::SingleFn { start, end }
                     }
@@ -121,7 +134,10 @@ impl AppState {
                     is_dragging: false,
                     drag_offset: Vector2 { x: 0.0, y: 0.0 },
                     is_resizing: false,
-                    resize_offset: Vector2 { x: 0.0, y: 0.0 },
+                    resize_origin_pos: Vector2 { x: 0.0, y: 0.0 },
+                    resize_origin_size: Vector2 { x: 0.0, y: 0.0 },
+                    resize_edges: (false, false, false, false),
+                    hover_edges: None,
                     dragging_vscroll: false,
                     dragging_hscroll: false,
                     dragging_minimap: false,
@@ -210,7 +226,10 @@ impl AppState {
             is_dragging: false,
             drag_offset: Vector2 { x: 0.0, y: 0.0 },
             is_resizing: false,
-            resize_offset: Vector2 { x: 0.0, y: 0.0 },
+            resize_origin_pos: Vector2 { x: 0.0, y: 0.0 },
+            resize_origin_size: Vector2 { x: 0.0, y: 0.0 },
+            resize_edges: (false, false, false, false),
+            hover_edges: None,
             dragging_vscroll: false,
             dragging_hscroll: false,
             dragging_minimap: false,
@@ -244,14 +263,18 @@ impl AppState {
                 w.dragging_vscroll = false;
                 w.dragging_hscroll = false;
                 w.dragging_minimap = false;
+                w.hover_edges = None;
             }
         }
 
         if wheel.abs() > f32::EPSILON {
-            if self
-                .sidebar
-                .handle_wheel(mouse, wheel, &self.project, &self.project.defs, sidebar_height)
-            {
+            if self.sidebar.handle_wheel(
+                mouse,
+                wheel,
+                &self.project,
+                &self.project.defs,
+                sidebar_height,
+            ) {
                 return;
             }
             for idx in (0..self.windows.len()).rev() {
@@ -282,9 +305,33 @@ impl AppState {
                     w.position = Vector2::new(mouse.x - w.drag_offset.x, mouse.y - w.drag_offset.y);
                 }
                 if w.is_resizing {
-                    let new_w = (mouse.x - w.position.x + w.resize_offset.x).max(MIN_WINDOW_W);
-                    let new_h = (mouse.y - w.position.y + w.resize_offset.y).max(MIN_WINDOW_H);
-                    w.size = Vector2::new(new_w, new_h);
+                    let (left, right, top, bottom) = w.resize_edges;
+                    let mut new_pos = w.resize_origin_pos;
+                    let mut new_size = w.resize_origin_size;
+                    let dx = mouse.x - w.drag_start.x;
+                    let dy = mouse.y - w.drag_start.y;
+                    if left {
+                        let max_x = w.resize_origin_pos.x + w.resize_origin_size.x - MIN_WINDOW_W;
+                        let nx = (w.resize_origin_pos.x + dx).min(max_x);
+                        new_size.x = (w.resize_origin_pos.x + w.resize_origin_size.x - nx)
+                            .max(MIN_WINDOW_W);
+                        new_pos.x = nx;
+                    }
+                    if right {
+                        new_size.x = (w.resize_origin_size.x + dx).max(MIN_WINDOW_W);
+                    }
+                    if top {
+                        let max_y = w.resize_origin_pos.y + w.resize_origin_size.y - MIN_WINDOW_H;
+                        let ny = (w.resize_origin_pos.y + dy).min(max_y);
+                        new_size.y = (w.resize_origin_pos.y + w.resize_origin_size.y - ny)
+                            .max(MIN_WINDOW_H);
+                        new_pos.y = ny;
+                    }
+                    if bottom {
+                        new_size.y = (w.resize_origin_size.y + dy).max(MIN_WINDOW_H);
+                    }
+                    w.position = new_pos;
+                    w.size = new_size;
                     code_window::clamp_window_scroll(&self.project, w);
                 }
                 if w.dragging_vscroll {
@@ -292,13 +339,13 @@ impl AppState {
                         let track_y = w.position.y + TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT;
                         let track_h = metrics.avail_height;
                         if track_h > 0.0 {
-                            let thumb_h = (metrics.avail_height
-                                / metrics.total_height.max(1.0)
+                            let thumb_h = (metrics.avail_height / metrics.total_height.max(1.0)
                                 * track_h)
                                 .clamp(SCROLLBAR_MIN_THUMB, track_h);
                             let denom = (track_h - thumb_h).max(1.0);
                             let scroll_range = metrics.max_scroll_y();
-                            let ratio = ((mouse.y - track_y - w.drag_start.y) / denom).clamp(0.0, 1.0);
+                            let ratio =
+                                ((mouse.y - track_y - w.drag_start.y) / denom).clamp(0.0, 1.0);
                             w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
                         }
                     }
@@ -308,13 +355,13 @@ impl AppState {
                         let track_x = w.position.x + CODE_X_OFFSET;
                         let track_w = metrics.avail_width;
                         if track_w > 0.0 {
-                            let thumb_w = (metrics.avail_width
-                                / metrics.max_width.max(1.0)
+                            let thumb_w = (metrics.avail_width / metrics.max_width.max(1.0)
                                 * track_w)
                                 .clamp(SCROLLBAR_MIN_THUMB, track_w);
                             let denom = (track_w - thumb_w).max(1.0);
                             let scroll_range = metrics.max_scroll_x();
-                            let ratio = ((mouse.x - track_x - w.drag_start.x) / denom).clamp(0.0, 1.0);
+                            let ratio =
+                                ((mouse.x - track_x - w.drag_start.x) / denom).clamp(0.0, 1.0);
                             w.scroll_x = (ratio * scroll_range).clamp(0.0, scroll_range);
                         }
                     }
@@ -327,6 +374,9 @@ impl AppState {
                             w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
                         }
                     }
+                }
+                if !w.is_resizing {
+                    w.hover_edges = w.hit_resize_edges(mouse);
                 }
             }
         }
@@ -352,18 +402,23 @@ impl AppState {
                                 win.is_resizing = false;
                             }
                         }
-                        WindowAction::StartResize(offset) => {
+                        WindowAction::StartResize { edges } => {
                             if let Some(win) = self.windows.last_mut() {
                                 win.is_resizing = true;
-                                win.resize_offset = offset;
+                                win.resize_origin_pos = win.position;
+                                win.resize_origin_size = win.size;
+                                win.resize_edges = edges;
+                                win.drag_start = mouse;
                                 win.is_dragging = false;
+                                win.hover_edges = Some(edges);
                             }
                         }
                         WindowAction::StartVScroll { grab_offset, ratio } => {
                             if let Some(win) = self.windows.last_mut() {
                                 win.dragging_vscroll = true;
                                 win.drag_start.y = grab_offset;
-                                if let Some(metrics) = code_window::metrics_for(&self.project, win) {
+                                if let Some(metrics) = code_window::metrics_for(&self.project, win)
+                                {
                                     let scroll_range = metrics.max_scroll_y();
                                     win.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
                                 }
@@ -375,7 +430,8 @@ impl AppState {
                             if let Some(win) = self.windows.last_mut() {
                                 win.dragging_hscroll = true;
                                 win.drag_start.x = grab_offset;
-                                if let Some(metrics) = code_window::metrics_for(&self.project, win) {
+                                if let Some(metrics) = code_window::metrics_for(&self.project, win)
+                                {
                                     let scroll_range = metrics.max_scroll_x();
                                     win.scroll_x = (ratio * scroll_range).clamp(0.0, scroll_range);
                                 }
@@ -387,7 +443,8 @@ impl AppState {
                             if let Some(win) = self.windows.last_mut() {
                                 win.dragging_minimap = true;
                                 win.drag_start.y = ratio;
-                                if let Some(metrics) = code_window::metrics_for(&self.project, win) {
+                                if let Some(metrics) = code_window::metrics_for(&self.project, win)
+                                {
                                     let scroll_range = metrics.max_scroll_y();
                                     win.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
                                 }
@@ -451,12 +508,23 @@ impl AppState {
 
     pub fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
         d.clear_background(self.palette.bg);
-        self.sidebar
-            .draw(d, font, mouse, &self.project, &self.project.defs, &self.palette);
+        self.sidebar.draw(
+            d,
+            font,
+            mouse,
+            &self.project,
+            &self.project.defs,
+            &self.palette,
+        );
+        let mut hover_cursor: Option<MouseCursor> = None;
         for idx in 0..self.windows.len() {
+            if let Some(edges) = self.windows[idx].hover_edges {
+                hover_cursor = Some(cursor_for_edges(edges));
+            }
             let is_top = idx + 1 == self.windows.len();
             self.draw_window(d, font, idx, is_top);
         }
+        d.set_mouse_cursor(hover_cursor.unwrap_or(MouseCursor::MOUSE_CURSOR_DEFAULT));
     }
 
     fn draw_window(&self, d: &mut RaylibDrawHandle, font: &AppFont, idx: usize, is_top: bool) {
@@ -466,24 +534,7 @@ impl AppState {
         } else {
             self.palette.window
         };
-        let radius = 0.06;
-        let shadow = Color {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 70,
-        };
-        d.draw_rectangle_rounded(
-            Rectangle {
-                x: win.position.x + 4.0,
-                y: win.position.y + 4.0,
-                width: win.size.x,
-                height: win.size.y,
-            },
-            radius,
-            12,
-            shadow,
-        );
+        let radius = 0.01;
         d.draw_rectangle_rounded(
             Rectangle {
                 x: win.position.x,
@@ -492,8 +543,19 @@ impl AppState {
                 height: win.size.y,
             },
             radius,
-            12,
+            10,
             bg,
+        );
+        d.draw_rectangle_rounded_lines(
+            Rectangle {
+                x: win.position.x,
+                y: win.position.y,
+                width: win.size.x,
+                height: win.size.y,
+            },
+            radius,
+            10,
+            self.palette.breadcrumb,
         );
 
         let title_rect = win.title_rect();
@@ -534,23 +596,15 @@ impl AppState {
             self.draw_code(d, font, pf, win);
         }
 
-        let resize_rect = win.resize_handle_rect();
-        d.draw_rectangle_lines(
-            resize_rect.x as i32,
-            resize_rect.y as i32,
-            resize_rect.width as i32,
-            resize_rect.height as i32,
-            self.palette.breadcrumb,
-        );
-        d.draw_line_ex(
-            Vector2::new(resize_rect.x + resize_rect.width - 8.0, resize_rect.y + resize_rect.height - 2.0),
-            Vector2::new(resize_rect.x + resize_rect.width - 2.0, resize_rect.y + resize_rect.height - 8.0),
-            1.0,
-            self.palette.breadcrumb,
-        );
     }
 
-    fn draw_code(&self, d: &mut RaylibDrawHandle, font: &AppFont, file: &ParsedFile, win: &CodeWindow) {
+    fn draw_code(
+        &self,
+        d: &mut RaylibDrawHandle,
+        font: &AppFont,
+        file: &ParsedFile,
+        win: &CodeWindow,
+    ) {
         let content_rect = win.content_rect();
         if content_rect.width <= 0.0 || content_rect.height <= 0.0 {
             return;
@@ -708,7 +762,8 @@ impl AppState {
         }
 
         if metrics.show_v {
-            let track_x = content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+            let track_x =
+                content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
             let track_y = content_rect.y + BREADCRUMB_HEIGHT;
             let track_h = metrics.avail_height;
             d.draw_rectangle(
@@ -734,7 +789,8 @@ impl AppState {
 
         if metrics.show_h {
             let track_x = content_rect.x + CODE_X_OFFSET;
-            let track_y = content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+            let track_y =
+                content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
             let track_w = metrics.avail_width;
             d.draw_rectangle(
                 track_x as i32,
@@ -773,18 +829,14 @@ impl AppState {
             return WindowAction::Close;
         }
 
+        if let Some(edges) = win.hit_resize_edges(mouse) {
+            return WindowAction::StartResize { edges };
+        }
+
         if point_in_rect(mouse, title_rect) {
             return WindowAction::StartDrag(Vector2 {
                 x: mouse.x - win.position.x,
                 y: mouse.y - win.position.y,
-            });
-        }
-
-        let resize_rect = win.resize_handle_rect();
-        if point_in_rect(mouse, resize_rect) {
-            return WindowAction::StartResize(Vector2 {
-                x: win.position.x + win.size.x - mouse.x,
-                y: win.position.y + win.size.y - mouse.y,
             });
         }
 
@@ -805,7 +857,9 @@ impl AppState {
                 let track_y = content_rect.y + BREADCRUMB_HEIGHT;
                 let track_h = metrics.avail_height;
                 if track_h > 0.0 {
-                    let track_x = content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+                    let track_x = content_rect.x + content_rect.width
+                        - SCROLLBAR_THICKNESS
+                        - SCROLLBAR_PADDING;
                     let scroll_range = metrics.max_scroll_y();
                     let thumb_h = (metrics.avail_height / metrics.total_height.max(1.0) * track_h)
                         .clamp(SCROLLBAR_MIN_THUMB, track_h);
@@ -833,7 +887,9 @@ impl AppState {
                 let track_x = content_rect.x + CODE_X_OFFSET;
                 let track_w = metrics.avail_width;
                 if track_w > 0.0 {
-                    let track_y = content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+                    let track_y = content_rect.y + content_rect.height
+                        - SCROLLBAR_THICKNESS
+                        - SCROLLBAR_PADDING;
                     let scroll_range = metrics.max_scroll_x();
                     let thumb_w = (metrics.avail_width / metrics.max_width.max(1.0) * track_w)
                         .clamp(SCROLLBAR_MIN_THUMB, track_w);
@@ -859,7 +915,9 @@ impl AppState {
             }
             if metrics.show_v {
                 let v_rect = Rectangle {
-                    x: content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
+                    x: content_rect.x + content_rect.width
+                        - SCROLLBAR_THICKNESS
+                        - SCROLLBAR_PADDING,
                     y: content_rect.y + BREADCRUMB_HEIGHT,
                     width: SCROLLBAR_THICKNESS,
                     height: metrics.avail_height,
@@ -871,7 +929,9 @@ impl AppState {
             if metrics.show_h {
                 let h_rect = Rectangle {
                     x: content_rect.x + CODE_X_OFFSET,
-                    y: content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
+                    y: content_rect.y + content_rect.height
+                        - SCROLLBAR_THICKNESS
+                        - SCROLLBAR_PADDING,
                     width: metrics.avail_width,
                     height: SCROLLBAR_THICKNESS,
                 };
@@ -1010,7 +1070,10 @@ impl AppState {
             is_dragging: false,
             drag_offset: Vector2 { x: 0.0, y: 0.0 },
             is_resizing: false,
-            resize_offset: Vector2 { x: 0.0, y: 0.0 },
+            resize_origin_pos: Vector2 { x: 0.0, y: 0.0 },
+            resize_origin_size: Vector2 { x: 0.0, y: 0.0 },
+            resize_edges: (false, false, false, false),
+            hover_edges: None,
             dragging_vscroll: false,
             dragging_hscroll: false,
             dragging_minimap: false,
@@ -1028,8 +1091,27 @@ enum WindowAction {
     Close,
     OpenDefinition(DefinitionLocation),
     StartDrag(Vector2),
-    StartResize(Vector2),
+    StartResize { edges: (bool, bool, bool, bool) },
     StartVScroll { grab_offset: f32, ratio: f32 },
     StartHScroll { grab_offset: f32, ratio: f32 },
     StartMinimap { ratio: f32 },
+}
+
+fn cursor_for_edges(edges: (bool, bool, bool, bool)) -> MouseCursor {
+    let (l, r, t, b) = edges;
+    match (l, r, t, b) {
+        (true, false, true, false) | (false, true, false, true) => {
+            MouseCursor::MOUSE_CURSOR_RESIZE_NWSE
+        }
+        (true, false, false, true) | (false, true, true, false) => {
+            MouseCursor::MOUSE_CURSOR_RESIZE_NESW
+        }
+        (true, false, false, false) | (false, true, false, false) => {
+            MouseCursor::MOUSE_CURSOR_RESIZE_EW
+        }
+        (false, false, true, false) | (false, false, false, true) => {
+            MouseCursor::MOUSE_CURSOR_RESIZE_NS
+        }
+        _ => MouseCursor::MOUSE_CURSOR_DEFAULT,
+    }
 }

@@ -4,19 +4,23 @@
       "file": "src\\app.rs",
       "view_kind": null,
       "position": [
-        259.0,
-        24.0
+        284.0,
+        68.0
       ],
       "size": [
-        811.0,
-        724.0
+        793.0,
+        614.0
       ],
-      "scroll": 1286.4,
+      "scroll": 0.0,
       "scroll_x": 0.0
     }
   ],
   "sidebar_scroll": 0.0,
   "sidebar_collapsed": [
-    "target"
+    "target",
+    "target\\debug",
+    "target\\debug\\build",
+    "target\\debug\\build\\clang-sys-71aa2661bc4de06c",
+    "target\\debug\\build\\clang-sys-71aa2661bc4de06c\\out"
   ]
 }

@@ -30,11 +30,14 @@ pub struct CodeWindow {
     pub is_dragging: bool,
     pub drag_offset: Vector2,
     pub is_resizing: bool,
-    pub resize_offset: Vector2,
+    pub resize_origin_pos: Vector2,
+    pub resize_origin_size: Vector2,
+    pub resize_edges: (bool, bool, bool, bool), // left, right, top, bottom
     pub dragging_vscroll: bool,
     pub dragging_hscroll: bool,
     pub dragging_minimap: bool,
     pub drag_start: Vector2,
+    pub hover_edges: Option<(bool, bool, bool, bool)>,
 }
 
 #[derive(Clone, Debug)]
@@ -194,5 +197,26 @@ impl CodeWindow {
             width,
             height,
         })
+    }
+
+    pub fn hit_resize_edges(&self, mouse: Vector2) -> Option<(bool, bool, bool, bool)> {
+        let margin = RESIZE_HANDLE;
+        let rect = Rectangle {
+            x: self.position.x,
+            y: self.position.y,
+            width: self.size.x,
+            height: self.size.y,
+        };
+        if unsafe { !raylib::ffi::CheckCollisionPointRec(mouse.into(), rect.into()) } {
+            return None;
+        }
+        let near_left = mouse.x < rect.x + margin;
+        let near_right = mouse.x > rect.x + rect.width - margin;
+        let near_top = mouse.y < rect.y + margin;
+        let near_bottom = mouse.y > rect.y + rect.height - margin;
+        if near_left || near_right || near_top || near_bottom {
+            return Some((near_left, near_right, near_top, near_bottom));
+        }
+        None
     }
 }
