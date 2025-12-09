@@ -35,6 +35,8 @@ struct Icons {
     folder: Option<Texture2D>,
     folder_open: Option<Texture2D>,
     file: Option<Texture2D>,
+    chevron_right: Option<Texture2D>,
+    chevron_down: Option<Texture2D>,
     size: u32,
 }
 
@@ -43,10 +45,14 @@ impl Icons {
         let folder = load_svg_texture(rl, thread, "data/icons/folder.svg", size);
         let folder_open = load_svg_texture(rl, thread, "data/icons/folder-open.svg", size);
         let file = load_svg_texture(rl, thread, "data/icons/document.svg", size);
+        let chevron_right = load_svg_texture(rl, thread, "data/icons/chevron-right.svg", size);
+        let chevron_down = load_svg_texture(rl, thread, "data/icons/chevron-down.svg", size);
         Self {
             folder,
             folder_open,
             file,
+            chevron_right,
+            chevron_down,
             size,
         }
     }
@@ -450,30 +456,37 @@ impl SidebarState {
                 let mut text_x = rect.x + 4.0;
                 if entry.is_dir {
                     let arrow = if self.is_collapsed(&entry.path) {
-                        ">"
+                        self.icons.chevron_right.as_ref()
                     } else {
-                        "v"
+                        self.icons.chevron_down.as_ref()
                     };
-                    font.draw_text_ex(
-                        &mut scoped,
-                        arrow,
-                        Vector2::new(text_x, rect.y + 4.0),
-                        TOGGLE_FONT_SIZE,
-                        0.0,
-                        palette.sidebar_text,
-                    );
-                    text_x += font.measure_width(arrow, TOGGLE_FONT_SIZE, 0.0) + 6.0;
+                    if let Some(tex) = arrow {
+                        let tint = palette.sidebar_text;
+                        scoped.draw_texture_ex(
+                            tex,
+                            Vector2::new(text_x, rect.y + 3.0),
+                            0.0,
+                            (TOGGLE_FONT_SIZE as f32) / (tex.height as f32),
+                            tint,
+                        );
+                    }
+                    text_x += TOGGLE_FONT_SIZE + 6.0;
                 }
                 if let Some(tex) = self
                     .icons
                     .texture_for(entry.is_dir, !self.is_collapsed(&entry.path))
                 {
+                    let tint = if entry.is_dir {
+                        palette.project
+                    } else {
+                        palette.sidebar_text
+                    };
                     scoped.draw_texture_ex(
                         tex,
                         Vector2::new(text_x, rect.y + 3.0),
                         0.0,
                         (self.icons.size as f32) / (tex.height as f32),
-                        Color::WHITE,
+                        tint,
                     );
                     text_x += self.icons.size as f32 + 6.0;
                 }
