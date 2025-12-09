@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::hash;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
@@ -31,41 +32,71 @@ pub enum SidebarAction {
     ToggleDir,
 }
 
+#[derive(Hash, Eq, PartialEq, Clone, Copy)]
+enum Icon {
+    Folder,
+    FolderOpen,
+    File,
+    ChevronRight,
+    ChevronDown,
+}
+
+impl Icon {
+    fn as_str(&self) -> &str {
+        match self {
+            Icon::Folder => "folder",
+            Icon::FolderOpen => "folder-open",
+            Icon::File => "file",
+            Icon::ChevronRight => "chevron-right",
+            Icon::ChevronDown => "chevron-down",
+        }
+    }
+}
+
 struct Icons {
-    folder: Option<Texture2D>,
-    folder_open: Option<Texture2D>,
-    file: Option<Texture2D>,
-    chevron_right: Option<Texture2D>,
-    chevron_down: Option<Texture2D>,
+    svgs: HashMap<Icon, Option<Texture2D>>,
     size: u32,
 }
 
 impl Icons {
     fn load(rl: &mut RaylibHandle, thread: &RaylibThread, size: u32) -> Self {
-        let folder = load_svg_texture(rl, thread, "data/icons/folder.svg", size);
-        let folder_open = load_svg_texture(rl, thread, "data/icons/folder-open.svg", size);
-        let file = load_svg_texture(rl, thread, "data/icons/document.svg", size);
-        let chevron_right = load_svg_texture(rl, thread, "data/icons/chevron-right.svg", size);
-        let chevron_down = load_svg_texture(rl, thread, "data/icons/chevron-down.svg", size);
-        Self {
-            folder,
-            folder_open,
-            file,
-            chevron_right,
-            chevron_down,
-            size,
-        }
+        let mut svgs = HashMap::new();
+        svgs.insert(
+            Icon::Folder,
+            load_svg_texture(rl, thread, "data/icons/folder.svg", size),
+        );
+        svgs.insert(
+            Icon::FolderOpen,
+            load_svg_texture(rl, thread, "data/icons/folder-open.svg", size),
+        );
+        svgs.insert(
+            Icon::File,
+            load_svg_texture(rl, thread, "data/icons/document.svg", size),
+        );
+        svgs.insert(
+            Icon::ChevronRight,
+            load_svg_texture(rl, thread, "data/icons/chevron-right.svg", size),
+        );
+        svgs.insert(
+            Icon::ChevronDown,
+            load_svg_texture(rl, thread, "data/icons/chevron-down.svg", size),
+        );
+        Self { svgs, size }
     }
 
-    fn texture_for(&self, is_dir: bool, is_open: bool) -> Option<&Texture2D> {
-        if is_dir {
-            if is_open {
-                self.folder_open.as_ref()
-            } else {
-                self.folder.as_ref()
-            }
-        } else {
-            self.file.as_ref()
+    fn texture_for(&self, icon: Icon) -> Option<&Texture2D> {
+        self.svgs.get(&icon).and_then(|t| t.as_ref())
+    }
+
+    fn render(&self, d: &mut RaylibDrawHandle, icon: Icon, pos: Vector2, tint: Color) {
+        if let Some(tex) = self.svgs.get(&icon).and_then(|t| t.as_ref()) {
+            d.draw_texture_ex(
+                tex,
+                pos,
+                0.0,
+                (self.size as f32) / (tex.height as f32),
+                tint,
+            );
         }
     }
 }
@@ -456,9 +487,9 @@ impl SidebarState {
                 let mut text_x = rect.x + 4.0;
                 if entry.is_dir {
                     let arrow = if self.is_collapsed(&entry.path) {
-                        self.icons.chevron_right.as_ref()
+                        self.icons.texture_for(Icon::ChevronRight)
                     } else {
-                        self.icons.chevron_down.as_ref()
+                        self.icons.texture_for(Icon::ChevronDown)
                     };
                     if let Some(tex) = arrow {
                         let tint = palette.sidebar_text;
@@ -472,10 +503,11 @@ impl SidebarState {
                     }
                     text_x += TOGGLE_FONT_SIZE + 6.0;
                 }
-                if let Some(tex) = self
-                    .icons
-                    .texture_for(entry.is_dir, !self.is_collapsed(&entry.path))
-                {
+                if let Some(tex) = self.icons.texture_for(if entry.is_dir {
+                    Icon::Folder
+                } else {
+                    Icon::File
+                }) {
                     let tint = if entry.is_dir {
                         palette.project
                     } else {

@@ -1,5 +1,4 @@
-use crate::app::CodeViewKind;
-use crate::model::ParsedFile;
+use crate::code_window::CodeViewKind;
 
 pub fn matches_view(a: &CodeViewKind, b: &CodeViewKind) -> bool {
     match (a, b) {

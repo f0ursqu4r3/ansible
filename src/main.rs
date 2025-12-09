@@ -4,6 +4,7 @@ use std::env;
 use std::path::PathBuf;
 
 mod app;
+mod code_window;
 mod constants;
 mod helpers;
 mod model;

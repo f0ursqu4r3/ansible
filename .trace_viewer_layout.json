@@ -1,11 +1,30 @@
 {
   "windows": [
     {
-      "file": "src\\app.rs",
+      "file": "src\\main.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 124,
+        "end": 130,
+        "title": "crate"
+      },
+      "position": [
+        1066.0,
+        218.0
+      ],
+      "size": [
+        720.0,
+        460.0
+      ],
+      "scroll": 2340.8,
+      "scroll_x": 0.0
+    },
+    {
+      "file": "src\\helpers.rs",
       "view_kind": null,
       "position": [
-        284.0,
-        40.0
+        956.0,
+        773.0
       ],
       "size": [
         720.0,
@@ -13,8 +32,24 @@
       ],
       "scroll": 0.0,
       "scroll_x": 0.0
+    },
+    {
+      "file": "src\\app.rs",
+      "view_kind": null,
+      "position": [
+        295.0,
+        40.0
+      ],
+      "size": [
+        837.0,
+        1306.0
+      ],
+      "scroll": 6950.3955,
+      "scroll_x": 0.0
     }
   ],
   "sidebar_scroll": 0.0,
-  "sidebar_collapsed": []
+  "sidebar_collapsed": [
+    "target"
+  ]
 }

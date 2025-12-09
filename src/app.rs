@@ -1,9 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use raylib::prelude::*;
 
+use crate::code_window::{
+    self, CodeViewKind, CodeWindow, MIN_WINDOW_H, MIN_WINDOW_W, SCROLLBAR_MIN_THUMB,
+    SCROLLBAR_PADDING, SCROLLBAR_THICKNESS,
+};
 use crate::constants::{
-    BREADCRUMB_HEIGHT, CODE_X_OFFSET, LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_WIDTH, TITLE_BAR_HEIGHT,
+    BREADCRUMB_HEIGHT, CODE_X_OFFSET, LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_WIDTH,
 };
 use crate::helpers::matches_view;
 use crate::model::{
@@ -13,27 +17,6 @@ use crate::sidebar::{SidebarAction, SidebarState};
 use crate::theme::Palette;
 use crate::{point_in_rect, token_rect, AppFont, FONT_SIZE};
 use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug)]
-pub struct CodeWindow {
-    pub id: usize,
-    pub file: PathBuf,
-    pub title: String,
-    pub focus_line: Option<usize>,
-    pub view_kind: CodeViewKind,
-    pub position: Vector2,
-    pub size: Vector2,
-    pub scroll: f32,
-    pub scroll_x: f32,
-    pub is_dragging: bool,
-    pub drag_offset: Vector2,
-}
-
-#[derive(Clone, Debug)]
-pub enum CodeViewKind {
-    FullFile,
-    SingleFn { start: usize, end: usize },
-}
 
 #[derive(Serialize, Deserialize)]
 struct SavedWindow {
@@ -133,13 +116,10 @@ impl AppState {
                     scroll_x: saved.scroll_x,
                     is_dragging: false,
                     drag_offset: Vector2 { x: 0.0, y: 0.0 },
+                    is_resizing: false,
+                    resize_offset: Vector2 { x: 0.0, y: 0.0 },
                 };
-                if let Some(max) = self.parsed_height(&win.file) {
-                    win.scroll = win.scroll.min(max);
-                }
-                if let Some(max_x) = self.max_scroll_x(&win) {
-                    win.scroll_x = win.scroll_x.min(max_x);
-                }
+                code_window::clamp_window_scroll(&self.project, &mut win);
                 self.windows.push(win);
                 self.next_window_id += 1;
             }
@@ -192,12 +172,7 @@ impl AppState {
                 win.scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
                 win.focus_line = Some(line);
             }
-            if let Some(max) = self.parsed_height(&win.file) {
-                win.scroll = win.scroll.min(max);
-            }
-            if let Some(max_x) = self.max_scroll_x(&win) {
-                win.scroll_x = win.scroll_x.min(max_x);
-            }
+            code_window::clamp_window_scroll(&self.project, &mut win);
             self.windows.push(win);
             return;
         }
@@ -226,35 +201,16 @@ impl AppState {
             scroll_x: 0.0,
             is_dragging: false,
             drag_offset: Vector2 { x: 0.0, y: 0.0 },
+            is_resizing: false,
+            resize_offset: Vector2 { x: 0.0, y: 0.0 },
         };
-        if let Some(max) = self.parsed_height(&win.file) {
-            win.scroll = win.scroll.min(max);
-        }
-        if let Some(max_x) = self.max_scroll_x(&win) {
-            win.scroll_x = win.scroll_x.min(max_x);
-        }
+        code_window::clamp_window_scroll(&self.project, &mut win);
         self.next_window_id += 1;
         self.windows.push(win);
     }
 
-    fn parsed_height(&self, file: &Path) -> Option<f32> {
-        self.project.parsed.get(file).map(|pf| {
-            let total_height = pf.lines.len() as f32 * LINE_HEIGHT;
-            (total_height - (TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT + 8.0)).max(0.0)
-        })
-    }
-
     fn max_scroll_x(&self, win: &CodeWindow) -> Option<f32> {
-        let pf = self.project.parsed.get(&win.file)?;
-        let mut max_width = 0.0f32;
-        for line in &pf.lines {
-            let w = crate::estimated_line_width(line);
-            if w > max_width {
-                max_width = w;
-            }
-        }
-        let visible = (win.size.x - CODE_X_OFFSET - 24.0).max(32.0);
-        Some((max_width - visible).max(0.0))
+        code_window::metrics_for(&self.project, win).map(|m| m.max_scroll_x())
     }
 
     pub fn handle_input(
@@ -272,6 +228,7 @@ impl AppState {
         if !left_down {
             for w in &mut self.windows {
                 w.is_dragging = false;
+                w.is_resizing = false;
             }
         }
 
@@ -309,6 +266,12 @@ impl AppState {
                 if w.is_dragging {
                     w.position = Vector2::new(mouse.x - w.drag_offset.x, mouse.y - w.drag_offset.y);
                 }
+                if w.is_resizing {
+                    let new_w = (mouse.x - w.position.x + w.resize_offset.x).max(MIN_WINDOW_W);
+                    let new_h = (mouse.y - w.position.y + w.resize_offset.y).max(MIN_WINDOW_H);
+                    w.size = Vector2::new(new_w, new_h);
+                    code_window::clamp_window_scroll(&self.project, w);
+                }
             }
         }
 
@@ -330,6 +293,14 @@ impl AppState {
                             if let Some(win) = self.windows.last_mut() {
                                 win.is_dragging = true;
                                 win.drag_offset = offset;
+                                win.is_resizing = false;
+                            }
+                        }
+                        WindowAction::StartResize(offset) => {
+                            if let Some(win) = self.windows.last_mut() {
+                                win.is_resizing = true;
+                                win.resize_offset = offset;
+                                win.is_dragging = false;
                             }
                         }
                         WindowAction::None => {}
@@ -381,12 +352,9 @@ impl AppState {
     }
 
     fn max_scroll(&self, idx: usize) -> f32 {
-        if let Some(pf) = self.project.parsed.get(&self.windows[idx].file) {
-            let total_height = pf.lines.len() as f32 * LINE_HEIGHT;
-            let visible = self.windows[idx].size.y - TITLE_BAR_HEIGHT - BREADCRUMB_HEIGHT - 8.0;
-            return (total_height - visible).max(0.0);
-        }
-        0.0
+        code_window::metrics_for(&self.project, &self.windows[idx])
+            .map(|m| m.max_scroll_y())
+            .unwrap_or(0.0)
     }
 
     pub fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
@@ -455,17 +423,58 @@ impl AppState {
         if let Some(pf) = self.project.parsed.get(&win.file) {
             self.draw_code(d, font, pf, win);
         }
+
+        let resize_rect = win.resize_handle_rect();
+        d.draw_rectangle_lines(
+            resize_rect.x as i32,
+            resize_rect.y as i32,
+            resize_rect.width as i32,
+            resize_rect.height as i32,
+            self.palette.breadcrumb,
+        );
+        d.draw_line_ex(
+            Vector2::new(resize_rect.x + resize_rect.width - 8.0, resize_rect.y + resize_rect.height - 2.0),
+            Vector2::new(resize_rect.x + resize_rect.width - 2.0, resize_rect.y + resize_rect.height - 8.0),
+            1.0,
+            self.palette.breadcrumb,
+        );
     }
 
     fn draw_code(&self, d: &mut RaylibDrawHandle, font: &AppFont, file: &ParsedFile, win: &CodeWindow) {
         let content_rect = win.content_rect();
+        if content_rect.width <= 0.0 || content_rect.height <= 0.0 {
+            return;
+        }
+
+        let metrics = code_window::content_metrics(file, win);
+        let scissor_w = (content_rect.width
+            - if metrics.show_v {
+                SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
+            } else {
+                0.0
+            })
+        .max(1.0);
+        let scissor_h = (content_rect.height
+            - if metrics.show_h {
+                SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
+            } else {
+                0.0
+            })
+        .max(1.0);
+        let mut scoped = d.begin_scissor_mode(
+            content_rect.x as i32,
+            content_rect.y as i32,
+            scissor_w as i32,
+            scissor_h as i32,
+        );
+
         let mut breadcrumb = self.project.display_name(&file.path);
         if let Some(mod_path) = file.defs.first().map(|d| d.module_path.as_str()) {
             breadcrumb.push_str(" - ");
             breadcrumb.push_str(mod_path);
         }
         font.draw_text_ex(
-            d,
+            &mut scoped,
             &breadcrumb,
             Vector2::new(content_rect.x + 8.0, content_rect.y + 2.0),
             FONT_SIZE - 2.0,
@@ -474,9 +483,9 @@ impl AppState {
         );
 
         let start_y = content_rect.y + BREADCRUMB_HEIGHT;
+        let text_area_height = metrics.avail_height;
         let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
-        let lines_visible =
-            ((content_rect.height - BREADCRUMB_HEIGHT + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
+        let lines_visible = ((text_area_height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
         let bottom = (top_visible + lines_visible + 1).min(file.lines.len());
         let mut y = start_y - (win.scroll % LINE_HEIGHT);
 
@@ -484,7 +493,7 @@ impl AppState {
             let line = &file.lines[idx];
             let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
             font.draw_text_ex(
-                d,
+                &mut scoped,
                 &format!("{:>4}", idx + 1),
                 Vector2::new(content_rect.x + 4.0, y),
                 FONT_SIZE - 2.0,
@@ -495,13 +504,64 @@ impl AppState {
             let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
             if calls.is_empty() {
                 let segments = colorize_line(line, &[]);
-                crate::draw_segments(d, font, text_start_x, y, &segments, &self.palette);
+                crate::draw_segments(&mut scoped, font, text_start_x, y, &segments, &self.palette);
             } else {
                 let segments = colorize_line(line, &calls);
-                crate::draw_segments(d, font, text_start_x, y, &segments, &self.palette);
+                crate::draw_segments(&mut scoped, font, text_start_x, y, &segments, &self.palette);
             }
 
             y += LINE_HEIGHT;
+        }
+        drop(scoped);
+
+        if metrics.show_v {
+            let track_x = content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+            let track_y = content_rect.y + BREADCRUMB_HEIGHT;
+            let track_h = metrics.avail_height;
+            d.draw_rectangle(
+                track_x as i32,
+                track_y as i32,
+                SCROLLBAR_THICKNESS as i32,
+                track_h as i32,
+                self.palette.search_bg,
+            );
+            let scroll_range = metrics.max_scroll_y().max(1.0);
+            let denom = metrics.total_height.max(1.0);
+            let thumb_h =
+                (metrics.avail_height / denom * track_h).clamp(SCROLLBAR_MIN_THUMB, track_h);
+            let thumb_y = track_y + (win.scroll / scroll_range) * (track_h - thumb_h);
+            d.draw_rectangle(
+                track_x as i32,
+                thumb_y as i32,
+                SCROLLBAR_THICKNESS as i32,
+                thumb_h as i32,
+                self.palette.sidebar_highlight,
+            );
+        }
+
+        if metrics.show_h {
+            let track_x = content_rect.x + CODE_X_OFFSET;
+            let track_y = content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+            let track_w = metrics.avail_width;
+            d.draw_rectangle(
+                track_x as i32,
+                track_y as i32,
+                track_w as i32,
+                SCROLLBAR_THICKNESS as i32,
+                self.palette.search_bg,
+            );
+            let scroll_range = metrics.max_scroll_x().max(1.0);
+            let denom = metrics.max_width.max(1.0);
+            let thumb_w =
+                (metrics.avail_width / denom * track_w).clamp(SCROLLBAR_MIN_THUMB, track_w);
+            let thumb_x = track_x + (win.scroll_x / scroll_range) * (track_w - thumb_w);
+            d.draw_rectangle(
+                thumb_x as i32,
+                track_y as i32,
+                thumb_w as i32,
+                SCROLLBAR_THICKNESS as i32,
+                self.palette.sidebar_highlight,
+            );
         }
     }
 
@@ -526,12 +586,43 @@ impl AppState {
             });
         }
 
+        let resize_rect = win.resize_handle_rect();
+        if point_in_rect(mouse, resize_rect) {
+            return WindowAction::StartResize(Vector2 {
+                x: win.position.x + win.size.x - mouse.x,
+                y: win.position.y + win.size.y - mouse.y,
+            });
+        }
+
         let content_rect = win.content_rect();
         if !point_in_rect(mouse, content_rect) {
             return WindowAction::None;
         }
 
         if let Some(pf) = self.project.parsed.get(&win.file) {
+            let metrics = code_window::content_metrics(pf, win);
+            if metrics.show_v {
+                let v_rect = Rectangle {
+                    x: content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
+                    y: content_rect.y + BREADCRUMB_HEIGHT,
+                    width: SCROLLBAR_THICKNESS,
+                    height: metrics.avail_height,
+                };
+                if point_in_rect(mouse, v_rect) {
+                    return WindowAction::None;
+                }
+            }
+            if metrics.show_h {
+                let h_rect = Rectangle {
+                    x: content_rect.x + CODE_X_OFFSET,
+                    y: content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
+                    width: metrics.avail_width,
+                    height: SCROLLBAR_THICKNESS,
+                };
+                if point_in_rect(mouse, h_rect) {
+                    return WindowAction::None;
+                }
+            }
             if let Some(def) = self.hit_test_calls(font, pf, win, mouse) {
                 return WindowAction::OpenDefinition(def);
             }
@@ -564,7 +655,7 @@ impl AppState {
         }
 
         for call in calls {
-            let rect = crate::token_rect(
+            let rect = token_rect(
                 font,
                 line,
                 call.col,
@@ -572,7 +663,7 @@ impl AppState {
                 content_rect.x + CODE_X_OFFSET - win.scroll_x,
                 content_top + (line_idx as f32 * LINE_HEIGHT) - win.scroll,
             );
-            if crate::point_in_rect(mouse, rect) {
+            if point_in_rect(mouse, rect) {
                 if let Some(defs) = self.project.defs.get(&call.name) {
                     if let Some(exact) = defs.iter().find(|d| d.module_path == call.module_path) {
                         return Some(exact.clone());
@@ -637,12 +728,7 @@ impl AppState {
                 win.scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
                 win.focus_line = Some(line);
             }
-            if let Some(max) = self.parsed_height(&win.file) {
-                win.scroll = win.scroll.min(max);
-            }
-            if let Some(max_x) = self.max_scroll_x(&win) {
-                win.scroll_x = win.scroll_x.min(max_x);
-            }
+            code_window::clamp_window_scroll(&self.project, &mut win);
             self.windows.push(win);
             return;
         }
@@ -667,13 +753,10 @@ impl AppState {
             scroll_x: 0.0,
             is_dragging: false,
             drag_offset: Vector2 { x: 0.0, y: 0.0 },
+            is_resizing: false,
+            resize_offset: Vector2 { x: 0.0, y: 0.0 },
         };
-        if let Some(max) = self.parsed_height(&win.file) {
-            win.scroll = win.scroll.min(max);
-        }
-        if let Some(max_x) = self.max_scroll_x(&win) {
-            win.scroll_x = win.scroll_x.min(max_x);
-        }
+        code_window::clamp_window_scroll(&self.project, &mut win);
         self.next_window_id += 1;
         self.windows.push(win);
     }
@@ -685,24 +768,5 @@ enum WindowAction {
     Close,
     OpenDefinition(DefinitionLocation),
     StartDrag(Vector2),
-}
-
-impl CodeWindow {
-    pub fn content_rect(&self) -> Rectangle {
-        Rectangle {
-            x: self.position.x,
-            y: self.position.y + TITLE_BAR_HEIGHT,
-            width: self.size.x,
-            height: self.size.y - TITLE_BAR_HEIGHT,
-        }
-    }
-
-    pub fn title_rect(&self) -> Rectangle {
-        Rectangle {
-            x: self.position.x,
-            y: self.position.y,
-            width: self.size.x,
-            height: TITLE_BAR_HEIGHT,
-        }
-    }
+    StartResize(Vector2),
 }
