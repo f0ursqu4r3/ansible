@@ -14,7 +14,7 @@ use crate::model::{
     colorize_line, find_function_span, DefinitionLocation, FunctionCall, ParsedFile, ProjectModel,
 };
 use crate::sidebar::{SidebarAction, SidebarState};
-use crate::theme::Palette;
+use crate::theme::{ColorKind, Palette};
 use crate::{point_in_rect, token_rect, AppFont, FONT_SIZE};
 use serde::{Deserialize, Serialize};
 
@@ -462,20 +462,46 @@ impl AppState {
         } else {
             self.palette.window
         };
-        d.draw_rectangle(
-            win.position.x as i32,
-            win.position.y as i32,
-            win.size.x as i32,
-            win.size.y as i32,
+        let radius = 0.06;
+        let shadow = Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 70,
+        };
+        d.draw_rectangle_rounded(
+            Rectangle {
+                x: win.position.x + 4.0,
+                y: win.position.y + 4.0,
+                width: win.size.x,
+                height: win.size.y,
+            },
+            radius,
+            12,
+            shadow,
+        );
+        d.draw_rectangle_rounded(
+            Rectangle {
+                x: win.position.x,
+                y: win.position.y,
+                width: win.size.x,
+                height: win.size.y,
+            },
+            radius,
+            12,
             bg,
         );
 
         let title_rect = win.title_rect();
-        d.draw_rectangle(
-            title_rect.x as i32,
-            title_rect.y as i32,
-            title_rect.width as i32,
-            title_rect.height as i32,
+        d.draw_rectangle_rounded(
+            Rectangle {
+                x: title_rect.x,
+                y: title_rect.y,
+                width: title_rect.width,
+                height: title_rect.height,
+            },
+            radius,
+            12,
             self.palette.title,
         );
         font.draw_text_ex(
@@ -580,14 +606,6 @@ impl AppState {
         for idx in top_visible..bottom {
             let line = &file.lines[idx];
             let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
-            font.draw_text_ex(
-                &mut scoped,
-                &format!("{:>4}", idx + 1),
-                Vector2::new(content_rect.x + 4.0, y),
-                FONT_SIZE - 2.0,
-                0.0,
-                self.palette.line_num,
-            );
 
             let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
             if calls.is_empty() {
@@ -598,6 +616,14 @@ impl AppState {
                 crate::draw_segments(&mut scoped, font, text_start_x, y, &segments, &self.palette);
             }
 
+            font.draw_text_ex(
+                &mut scoped,
+                &format!("{:>4}", idx + 1),
+                Vector2::new(content_rect.x + 4.0, y),
+                FONT_SIZE - 2.0,
+                0.0,
+                self.palette.line_num,
+            );
             y += LINE_HEIGHT;
         }
         drop(scoped);
@@ -617,6 +643,46 @@ impl AppState {
                 bg,
             );
             let scale = mini.height / metrics.total_height.max(1.0);
+            let line_scale = scale * LINE_HEIGHT;
+            let mini_font = (line_scale * 0.9).clamp(6.0, FONT_SIZE);
+            {
+                let mut scoped = d.begin_scissor_mode(
+                    mini.x as i32,
+                    mini.y as i32,
+                    mini.width as i32,
+                    mini.height as i32,
+                );
+                for (idx, line) in file.lines.iter().enumerate() {
+                    let line_y = mini.y + idx as f32 * line_scale;
+                    if line_y > mini.y + mini.height {
+                        break;
+                    }
+                    let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
+                    let segments = colorize_line(line, &calls);
+                    let mut x = mini.x + 2.0;
+                    for (text, color) in segments {
+                        let c = match color {
+                            ColorKind::Text => self.palette.text,
+                            ColorKind::Comment => self.palette.comment,
+                            ColorKind::String => self.palette.string,
+                            ColorKind::Keyword => self.palette.keyword,
+                            ColorKind::Call => self.palette.call,
+                        };
+                        font.draw_text_ex(
+                            &mut scoped,
+                            &text,
+                            Vector2::new(x, line_y),
+                            mini_font,
+                            0.0,
+                            c,
+                        );
+                        x += font.measure_width(&text, mini_font, 0.0);
+                        if x > mini.x + mini.width - 2.0 {
+                            break;
+                        }
+                    }
+                }
+            }
             let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
             let view_y = mini.y + win.scroll * scale;
             d.draw_rectangle(
