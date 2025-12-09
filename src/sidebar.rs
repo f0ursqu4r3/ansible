@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::hash;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
@@ -470,8 +469,7 @@ impl SidebarState {
                 let rect = self.entry_rect(entry, visible_y);
                 if rect.y + rect.height < start_y {
                     visible_y += SIDEBAR_ROW_H;
-                    continue;
-                }
+                    continue; 
                 if rect.y > scoped.get_screen_height() as f32 {
                     break;
                 }

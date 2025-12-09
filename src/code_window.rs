@@ -13,6 +13,8 @@ pub const SCROLLBAR_PADDING: f32 = 4.0;
 pub const SCROLLBAR_MIN_THUMB: f32 = 18.0;
 pub const CONTENT_PADDING: f32 = 8.0;
 pub const RIGHT_TEXT_PAD: f32 = 24.0;
+pub const MINIMAP_WIDTH: f32 = 64.0;
+pub const MINIMAP_PADDING: f32 = 6.0;
 
 #[derive(Clone, Debug)]
 pub struct CodeWindow {
@@ -29,6 +31,10 @@ pub struct CodeWindow {
     pub drag_offset: Vector2,
     pub is_resizing: bool,
     pub resize_offset: Vector2,
+    pub dragging_vscroll: bool,
+    pub dragging_hscroll: bool,
+    pub dragging_minimap: bool,
+    pub drag_start: Vector2,
 }
 
 #[derive(Clone, Debug)]
@@ -147,5 +153,47 @@ impl CodeWindow {
             width: RESIZE_HANDLE,
             height: RESIZE_HANDLE,
         }
+    }
+
+    pub fn v_scroll_rect(&self, metrics: &ContentMetrics) -> Rectangle {
+        Rectangle {
+            x: self.position.x + self.size.x - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
+            y: self.position.y + TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT,
+            width: SCROLLBAR_THICKNESS,
+            height: metrics.avail_height,
+        }
+    }
+
+    pub fn h_scroll_rect(&self, metrics: &ContentMetrics) -> Rectangle {
+        Rectangle {
+            x: self.position.x + CODE_X_OFFSET,
+            y: self.position.y + self.size.y - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
+            width: metrics.avail_width,
+            height: SCROLLBAR_THICKNESS,
+        }
+    }
+
+    pub fn minimap_rect(&self, metrics: &ContentMetrics) -> Option<Rectangle> {
+        let content = self.content_rect();
+        let gutter = if metrics.show_v {
+            SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
+        } else {
+            0.0
+        };
+        let x = content.x + content.width - MINIMAP_WIDTH - gutter - MINIMAP_PADDING;
+        let width = MINIMAP_WIDTH;
+        if width <= 0.0 || content.width < width + gutter + MINIMAP_PADDING {
+            return None;
+        }
+        let height = metrics.avail_height;
+        if height <= 0.0 {
+            return None;
+        }
+        Some(Rectangle {
+            x,
+            y: content.y + BREADCRUMB_HEIGHT,
+            width,
+            height,
+        })
     }
 }

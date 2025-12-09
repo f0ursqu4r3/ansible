@@ -7,7 +7,7 @@ use crate::code_window::{
     SCROLLBAR_PADDING, SCROLLBAR_THICKNESS,
 };
 use crate::constants::{
-    BREADCRUMB_HEIGHT, CODE_X_OFFSET, LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_WIDTH,
+    BREADCRUMB_HEIGHT, CODE_X_OFFSET, LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_WIDTH, TITLE_BAR_HEIGHT,
 };
 use crate::helpers::matches_view;
 use crate::model::{
@@ -118,6 +118,10 @@ impl AppState {
                     drag_offset: Vector2 { x: 0.0, y: 0.0 },
                     is_resizing: false,
                     resize_offset: Vector2 { x: 0.0, y: 0.0 },
+                    dragging_vscroll: false,
+                    dragging_hscroll: false,
+                    dragging_minimap: false,
+                    drag_start: Vector2 { x: 0.0, y: 0.0 },
                 };
                 code_window::clamp_window_scroll(&self.project, &mut win);
                 self.windows.push(win);
@@ -203,6 +207,10 @@ impl AppState {
             drag_offset: Vector2 { x: 0.0, y: 0.0 },
             is_resizing: false,
             resize_offset: Vector2 { x: 0.0, y: 0.0 },
+            dragging_vscroll: false,
+            dragging_hscroll: false,
+            dragging_minimap: false,
+            drag_start: Vector2 { x: 0.0, y: 0.0 },
         };
         code_window::clamp_window_scroll(&self.project, &mut win);
         self.next_window_id += 1;
@@ -229,6 +237,9 @@ impl AppState {
             for w in &mut self.windows {
                 w.is_dragging = false;
                 w.is_resizing = false;
+                w.dragging_vscroll = false;
+                w.dragging_hscroll = false;
+                w.dragging_minimap = false;
             }
         }
 
@@ -272,6 +283,47 @@ impl AppState {
                     w.size = Vector2::new(new_w, new_h);
                     code_window::clamp_window_scroll(&self.project, w);
                 }
+                if w.dragging_vscroll {
+                    if let Some(metrics) = code_window::metrics_for(&self.project, w) {
+                        let track_y = w.position.y + TITLE_BAR_HEIGHT + BREADCRUMB_HEIGHT;
+                        let track_h = metrics.avail_height;
+                        if track_h > 0.0 {
+                            let thumb_h = (metrics.avail_height
+                                / metrics.total_height.max(1.0)
+                                * track_h)
+                                .clamp(SCROLLBAR_MIN_THUMB, track_h);
+                            let denom = (track_h - thumb_h).max(1.0);
+                            let scroll_range = metrics.max_scroll_y();
+                            let ratio = ((mouse.y - track_y - w.drag_start.y) / denom).clamp(0.0, 1.0);
+                            w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
+                        }
+                    }
+                }
+                if w.dragging_hscroll {
+                    if let Some(metrics) = code_window::metrics_for(&self.project, w) {
+                        let track_x = w.position.x + CODE_X_OFFSET;
+                        let track_w = metrics.avail_width;
+                        if track_w > 0.0 {
+                            let thumb_w = (metrics.avail_width
+                                / metrics.max_width.max(1.0)
+                                * track_w)
+                                .clamp(SCROLLBAR_MIN_THUMB, track_w);
+                            let denom = (track_w - thumb_w).max(1.0);
+                            let scroll_range = metrics.max_scroll_x();
+                            let ratio = ((mouse.x - track_x - w.drag_start.x) / denom).clamp(0.0, 1.0);
+                            w.scroll_x = (ratio * scroll_range).clamp(0.0, scroll_range);
+                        }
+                    }
+                }
+                if w.dragging_minimap {
+                    if let Some(metrics) = code_window::metrics_for(&self.project, w) {
+                        if let Some(mini) = w.minimap_rect(&metrics) {
+                            let ratio = ((mouse.y - mini.y) / mini.height).clamp(0.0, 1.0);
+                            let scroll_range = metrics.max_scroll_y();
+                            w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
+                        }
+                    }
+                }
             }
         }
 
@@ -301,6 +353,42 @@ impl AppState {
                                 win.is_resizing = true;
                                 win.resize_offset = offset;
                                 win.is_dragging = false;
+                            }
+                        }
+                        WindowAction::StartVScroll { grab_offset, ratio } => {
+                            if let Some(win) = self.windows.last_mut() {
+                                win.dragging_vscroll = true;
+                                win.drag_start.y = grab_offset;
+                                if let Some(metrics) = code_window::metrics_for(&self.project, win) {
+                                    let scroll_range = metrics.max_scroll_y();
+                                    win.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
+                                }
+                                win.dragging_hscroll = false;
+                                win.dragging_minimap = false;
+                            }
+                        }
+                        WindowAction::StartHScroll { grab_offset, ratio } => {
+                            if let Some(win) = self.windows.last_mut() {
+                                win.dragging_hscroll = true;
+                                win.drag_start.x = grab_offset;
+                                if let Some(metrics) = code_window::metrics_for(&self.project, win) {
+                                    let scroll_range = metrics.max_scroll_x();
+                                    win.scroll_x = (ratio * scroll_range).clamp(0.0, scroll_range);
+                                }
+                                win.dragging_vscroll = false;
+                                win.dragging_minimap = false;
+                            }
+                        }
+                        WindowAction::StartMinimap { ratio } => {
+                            if let Some(win) = self.windows.last_mut() {
+                                win.dragging_minimap = true;
+                                win.drag_start.y = ratio;
+                                if let Some(metrics) = code_window::metrics_for(&self.project, win) {
+                                    let scroll_range = metrics.max_scroll_y();
+                                    win.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
+                                }
+                                win.dragging_vscroll = false;
+                                win.dragging_hscroll = false;
                             }
                         }
                         WindowAction::None => {}
@@ -514,6 +602,39 @@ impl AppState {
         }
         drop(scoped);
 
+        if let Some(mini) = win.minimap_rect(&metrics) {
+            let bg = Color {
+                r: self.palette.search_bg.r,
+                g: self.palette.search_bg.g,
+                b: self.palette.search_bg.b,
+                a: 140,
+            };
+            d.draw_rectangle(
+                mini.x as i32,
+                mini.y as i32,
+                mini.width as i32,
+                mini.height as i32,
+                bg,
+            );
+            let scale = mini.height / metrics.total_height.max(1.0);
+            let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
+            let view_y = mini.y + win.scroll * scale;
+            d.draw_rectangle(
+                mini.x as i32,
+                view_y as i32,
+                mini.width as i32,
+                view_h as i32,
+                self.palette.sidebar_highlight,
+            );
+            d.draw_rectangle_lines(
+                mini.x as i32,
+                mini.y as i32,
+                mini.width as i32,
+                mini.height as i32,
+                self.palette.title,
+            );
+        }
+
         if metrics.show_v {
             let track_x = content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
             let track_y = content_rect.y + BREADCRUMB_HEIGHT;
@@ -601,6 +722,68 @@ impl AppState {
 
         if let Some(pf) = self.project.parsed.get(&win.file) {
             let metrics = code_window::content_metrics(pf, win);
+            if let Some(mini) = win.minimap_rect(&metrics) {
+                if point_in_rect(mouse, mini) {
+                    let ratio = ((mouse.y - mini.y) / mini.height).clamp(0.0, 1.0);
+                    return WindowAction::StartMinimap { ratio };
+                }
+            }
+            if metrics.show_v {
+                let track_y = content_rect.y + BREADCRUMB_HEIGHT;
+                let track_h = metrics.avail_height;
+                if track_h > 0.0 {
+                    let track_x = content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+                    let scroll_range = metrics.max_scroll_y();
+                    let thumb_h = (metrics.avail_height / metrics.total_height.max(1.0) * track_h)
+                        .clamp(SCROLLBAR_MIN_THUMB, track_h);
+                    let thumb_y = track_y
+                        + if scroll_range > 0.0 {
+                            (win.scroll / scroll_range) * (track_h - thumb_h)
+                        } else {
+                            0.0
+                        };
+                    let denom = (track_h - thumb_h).max(1.0);
+                    let ratio = ((mouse.y - track_y - thumb_h * 0.5) / denom).clamp(0.0, 1.0);
+                    let grab_offset = (mouse.y - thumb_y).clamp(0.0, thumb_h);
+                    let v_rect = Rectangle {
+                        x: track_x,
+                        y: track_y,
+                        width: SCROLLBAR_THICKNESS,
+                        height: track_h,
+                    };
+                    if point_in_rect(mouse, v_rect) {
+                        return WindowAction::StartVScroll { grab_offset, ratio };
+                    }
+                }
+            }
+            if metrics.show_h {
+                let track_x = content_rect.x + CODE_X_OFFSET;
+                let track_w = metrics.avail_width;
+                if track_w > 0.0 {
+                    let track_y = content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+                    let scroll_range = metrics.max_scroll_x();
+                    let thumb_w = (metrics.avail_width / metrics.max_width.max(1.0) * track_w)
+                        .clamp(SCROLLBAR_MIN_THUMB, track_w);
+                    let thumb_x = track_x
+                        + if scroll_range > 0.0 {
+                            (win.scroll_x / scroll_range) * (track_w - thumb_w)
+                        } else {
+                            0.0
+                        };
+                    let denom = (track_w - thumb_w).max(1.0);
+                    let ratio = ((mouse.x - track_x - thumb_w * 0.5) / denom).clamp(0.0, 1.0);
+                    let grab_offset = (mouse.x - thumb_x).clamp(0.0, thumb_w);
+                    let h_rect = Rectangle {
+                        x: track_x,
+                        y: track_y,
+                        width: track_w,
+                        height: SCROLLBAR_THICKNESS,
+                    };
+                    if point_in_rect(mouse, h_rect) {
+                        return WindowAction::StartHScroll { grab_offset, ratio };
+                    }
+                }
+            }
             if metrics.show_v {
                 let v_rect = Rectangle {
                     x: content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING,
@@ -755,6 +938,10 @@ impl AppState {
             drag_offset: Vector2 { x: 0.0, y: 0.0 },
             is_resizing: false,
             resize_offset: Vector2 { x: 0.0, y: 0.0 },
+            dragging_vscroll: false,
+            dragging_hscroll: false,
+            dragging_minimap: false,
+            drag_start: Vector2 { x: 0.0, y: 0.0 },
         };
         code_window::clamp_window_scroll(&self.project, &mut win);
         self.next_window_id += 1;
@@ -769,4 +956,7 @@ enum WindowAction {
     OpenDefinition(DefinitionLocation),
     StartDrag(Vector2),
     StartResize(Vector2),
+    StartVScroll { grab_offset: f32, ratio: f32 },
+    StartHScroll { grab_offset: f32, ratio: f32 },
+    StartMinimap { ratio: f32 },
 }
