@@ -52,6 +52,18 @@ impl AppFont {
             AppFont::Default(f) => f.measure_text(text.as_ref(), size, spacing).x,
         }
     }
+
+    fn apply_filter(&self, thread: &RaylibThread) {
+        let filter = TextureFilter::TEXTURE_FILTER_BILINEAR;
+        match self {
+            AppFont::Owned(f) => {
+                f.texture().set_texture_filter(thread, filter);
+            }
+            AppFont::Default(f) => {
+                f.texture().set_texture_filter(thread, filter);
+            }
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -168,12 +180,16 @@ pub fn load_monospace_font(rl: &mut RaylibHandle, thread: &RaylibThread) -> AppF
         }
         if let Some(path_str) = p.to_str() {
             if let Ok(font) = rl.load_font_ex(thread, path_str, FONT_SIZE as i32, None) {
-                return AppFont::owned(font);
+                let app_font = AppFont::owned(font);
+                app_font.apply_filter(thread);
+                return app_font;
             }
         }
     }
 
-    AppFont::default_font(rl)
+    let font = AppFont::default_font(rl);
+    font.apply_filter(thread);
+    font
 }
 
 pub fn draw_segments(

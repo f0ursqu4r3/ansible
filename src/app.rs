@@ -81,6 +81,18 @@ struct MinimapContext {
 }
 
 impl AppState {
+    fn single_fn_title(&self, file: &PathBuf, start: usize) -> Option<String> {
+        let pf = self.project.parsed.get(file)?;
+        let func_name = pf
+            .defs
+            .iter()
+            .find(|d| d.line == start)
+            .or_else(|| pf.defs.iter().find(|d| d.line > start))
+            .map(|d| d.name.clone())?;
+        let file_name = file.file_name()?.to_str()?;
+        Some(format!("{file_name} - {func_name}"))
+    }
+
     pub fn new(
         project: ProjectModel,
         rl: &mut RaylibHandle,
@@ -143,8 +155,9 @@ impl AppState {
                         end,
                         title: t,
                     }) => {
-                        title = t;
-                        CodeViewKind::SingleFn { start, end }
+                        let vk = CodeViewKind::SingleFn { start, end };
+                        title = self.single_fn_title(&file, start).unwrap_or(t);
+                        vk
                     }
                     _ => CodeViewKind::FullFile,
                 };
@@ -1006,27 +1019,38 @@ impl AppState {
     }
 
     fn open_definition(&mut self, def: DefinitionLocation) {
-        let title = def
-            .module_path
-            .split("::")
-            .last()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                def.file
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("fn")
-                    .to_string()
-            });
+        let file_name = def
+            .file
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("fn")
+            .to_string();
 
-        let view_kind = if let Some(pf) = self.project.parsed.get(&def.file) {
+        let (title, view_kind) = if let Some(pf) = self.project.parsed.get(&def.file) {
             if let Some((start, end)) = find_function_span(pf, def.line) {
-                CodeViewKind::SingleFn { start, end }
+                let title = self
+                    .single_fn_title(&def.file, start)
+                    .unwrap_or_else(|| file_name.clone());
+                (title, CodeViewKind::SingleFn { start, end })
             } else {
-                CodeViewKind::FullFile
+                (
+                    def.module_path
+                        .split("::")
+                        .last()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| file_name.clone()),
+                    CodeViewKind::FullFile,
+                )
             }
         } else {
-            CodeViewKind::FullFile
+            (
+                def.module_path
+                    .split("::")
+                    .last()
+                    .map(|s| s.to_string())
+                    .unwrap_or(file_name.clone()),
+                CodeViewKind::FullFile,
+            )
         };
 
         self.open_file_with_view(def.file, Some(def.line), title, view_kind);
@@ -1045,8 +1069,13 @@ impl AppState {
             .position(|w| w.file == path && matches_view(&w.view_kind, &view_kind))
         {
             let mut win = self.windows.remove(idx);
+            win.title = title.clone();
             if let Some(line) = jump_to {
-                win.scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
+                let local_line = match view_kind {
+                    CodeViewKind::SingleFn { start, .. } => line.saturating_sub(start),
+                    _ => line,
+                };
+                win.scroll = (local_line as f32 * LINE_HEIGHT - 40.0).max(0.0);
                 win.focus_line = Some(line);
             }
             code_window::clamp_window_scroll(&self.project, &mut win);
@@ -1060,7 +1089,11 @@ impl AppState {
         );
         let mut scroll = 0.0;
         if let Some(line) = jump_to {
-            scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
+            let local_line = match view_kind {
+                CodeViewKind::SingleFn { start, .. } => line.saturating_sub(start),
+                _ => line,
+            };
+            scroll = (local_line as f32 * LINE_HEIGHT - 40.0).max(0.0);
         }
         let mut win = CodeWindow {
             id: self.next_window_id,

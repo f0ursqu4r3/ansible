@@ -77,13 +77,14 @@ pub fn metrics_for(project: &ProjectModel, win: &CodeWindow) -> Option<ContentMe
 }
 
 pub fn content_metrics(pf: &ParsedFile, win: &CodeWindow) -> ContentMetrics {
+    let (_, view_lines) = win.view_lines(pf);
     let base_width = (win.size.x - CODE_X_OFFSET - RIGHT_TEXT_PAD).max(32.0);
     let base_height =
         (win.size.y - TITLE_BAR_HEIGHT - BREADCRUMB_HEIGHT - CONTENT_PADDING).max(LINE_HEIGHT);
-    let max_width = pf.lines.iter().fold(0.0f32, |acc, line| {
+    let max_width = view_lines.iter().fold(0.0f32, |acc, line| {
         acc.max(crate::estimated_line_width(line))
     });
-    let total_height = pf.lines.len() as f32 * LINE_HEIGHT;
+    let total_height = view_lines.len() as f32 * LINE_HEIGHT;
 
     let mut avail_width = base_width;
     let mut avail_height = base_height;
@@ -197,6 +198,29 @@ impl CodeWindow {
             width,
             height,
         })
+    }
+
+    pub fn view_range(&self, pf: &ParsedFile) -> (usize, usize) {
+        if pf.lines.is_empty() {
+            return (0, 0);
+        }
+        let last = pf.lines.len().saturating_sub(1);
+        match self.view_kind {
+            CodeViewKind::FullFile => (0, last),
+            CodeViewKind::SingleFn { start, end } => {
+                let s = start.min(last);
+                let e = end.min(last);
+                if s > e { (e, e) } else { (s, e) }
+            }
+        }
+    }
+
+    pub fn view_lines<'a>(&'a self, pf: &'a ParsedFile) -> (usize, &'a [String]) {
+        if pf.lines.is_empty() {
+            return (0, &[]);
+        }
+        let (start, end) = self.view_range(pf);
+        (start, &pf.lines[start..=end])
     }
 
     pub fn hit_test(&self, mouse: Vector2) -> bool {
@@ -327,6 +351,7 @@ pub fn draw_code(
     }
 
     let metrics = content_metrics(file, win);
+    let (view_start, view_lines) = win.view_lines(file);
     let scissor_w = (content_rect.width
         - if metrics.show_v {
             SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
@@ -376,7 +401,7 @@ pub fn draw_code(
     let text_area_height = metrics.avail_height;
     let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
     let lines_visible = ((text_area_height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
-    let bottom = (top_visible + lines_visible + 1).min(file.lines.len());
+    let bottom = (top_visible + lines_visible + 1).min(view_lines.len());
     let mut y = start_y - (win.scroll % LINE_HEIGHT);
 
     let gutter_width = CODE_X_OFFSET - 4.0;
@@ -389,16 +414,17 @@ pub fn draw_code(
     );
 
     for idx in top_visible..bottom {
-        let _line = &file.lines[idx];
+        let line_idx = view_start + idx;
+        let _line = &file.lines[line_idx];
         let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
 
-        let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
-        let segments = colorized_segments_with_calls(file, idx, &calls, palette);
+        let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
+        let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
         draw_segments(&mut scoped, font, text_start_x, y, &segments);
 
         font.draw_text_ex(
             &mut scoped,
-            &format!("{:>4}", idx + 1),
+            &format!("{:>4}", line_idx + 1),
             Vector2::new(content_rect.x + 4.0, y),
             FONT_SIZE - 2.0,
             0.0,
@@ -427,13 +453,14 @@ pub fn draw_code(
             mini_scissor.width as i32,
             mini_scissor.height as i32,
         );
-        for (idx, _line) in file.lines.iter().enumerate() {
+        for (idx, _line) in view_lines.iter().enumerate() {
             let line_y = mini.y + idx as f32 * line_scale;
             if line_y > mini.y + mini.height {
                 break;
             }
-            let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
-            let segments = colorized_segments_with_calls(file, idx, &calls, palette);
+            let line_idx = view_start + idx;
+            let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
+            let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
             let mut x = mini.x + 2.0;
             for (text, color) in segments {
                 let width = font
@@ -534,15 +561,17 @@ pub fn hit_test_calls(
     project: &ProjectModel,
 ) -> Option<DefinitionLocation> {
     let content_rect = win.content_rect_at(Vector2::new(0.0, 0.0));
+    let (view_start, view_lines) = win.view_lines(file);
     let content_top = content_rect.y + BREADCRUMB_HEIGHT;
     let local_y = mouse.y - content_top + win.scroll;
     if local_y < 0.0 {
         return None;
     }
     let line_idx = (local_y / LINE_HEIGHT).floor() as usize;
-    if line_idx >= file.lines.len() {
+    if line_idx >= view_lines.len() {
         return None;
     }
+    let line_idx = view_start + line_idx;
     let line = &file.lines[line_idx];
     let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
     if calls.is_empty() {
