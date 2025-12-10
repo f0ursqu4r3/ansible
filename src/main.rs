@@ -83,6 +83,8 @@ fn main() -> Result<()> {
         let middle_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_MIDDLE);
         let shift_down = rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
             || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
+        let ctrl_down = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
+            || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
 
         let typed = collect_typed_chars(&mut rl);
         let backspace = rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE);
@@ -97,6 +99,7 @@ fn main() -> Result<()> {
             typed,
             backspace,
             shift_down,
+            ctrl_down,
             rl.get_screen_height() as f32,
         );
 

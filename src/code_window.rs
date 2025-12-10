@@ -3,8 +3,10 @@ use std::path::PathBuf;
 use raylib::prelude::*;
 
 use crate::constants::{BREADCRUMB_HEIGHT, CODE_X_OFFSET, LINE_HEIGHT, TITLE_BAR_HEIGHT};
-use crate::model::{ParsedFile, ProjectModel};
-use crate::point_in_rect;
+use crate::icons::{Icon, Icons};
+use crate::model::{DefinitionLocation, FunctionCall, ParsedFile, ProjectModel, colorize_line};
+use crate::theme::{ColorKind, Palette};
+use crate::{AppFont, FONT_SIZE, draw_segments, point_in_rect, token_rect};
 
 pub const RESIZE_HANDLE: f32 = 14.0;
 pub const MIN_WINDOW_W: f32 = 320.0;
@@ -130,6 +132,15 @@ pub fn clamp_window_scroll(project: &ProjectModel, win: &mut CodeWindow) {
     }
 }
 
+fn world_to_screen_rect(rect: Rectangle, pan: Vector2, zoom: f32) -> Rectangle {
+    Rectangle {
+        x: (rect.x + pan.x) * zoom,
+        y: (rect.y + pan.y) * zoom,
+        width: rect.width * zoom,
+        height: rect.height * zoom,
+    }
+}
+
 impl CodeWindow {
     pub fn rect_at(&self, offset: Vector2) -> Rectangle {
         Rectangle {
@@ -240,4 +251,325 @@ impl CodeWindow {
         }
         None
     }
+
+    pub fn draw_window(
+        &self,
+        d: &mut RaylibDrawHandle,
+        font: &AppFont,
+        palette: &Palette,
+        icons: &Icons,
+        project: &ProjectModel,
+        is_top: bool,
+        pan: Vector2,
+        zoom: f32,
+    ) {
+        let bg = if is_top {
+            palette.window_top
+        } else {
+            palette.window
+        };
+        let radius = 0.01;
+        let win_rect = self.rect_at(Vector2::new(0.0, 0.0));
+        d.draw_rectangle_rounded(win_rect, radius, 10, bg);
+        d.draw_rectangle_rounded_lines(win_rect, radius, 10, palette.breadcrumb);
+
+        let title_rect = self.title_rect_at(Vector2::new(0.0, 0.0));
+        d.draw_rectangle_rounded(
+            Rectangle {
+                x: title_rect.x,
+                y: title_rect.y,
+                width: title_rect.width,
+                height: title_rect.height,
+            },
+            radius,
+            12,
+            palette.title,
+        );
+        font.draw_text_ex(
+            d,
+            &self.title,
+            Vector2::new(title_rect.x + 8.0, title_rect.y + 8.0),
+            FONT_SIZE,
+            0.0,
+            palette.text,
+        );
+        let icon_size = icons.size() as f32;
+        let close_rect = Rectangle {
+            x: title_rect.x + title_rect.width - icon_size - 8.0,
+            y: title_rect.y + (TITLE_BAR_HEIGHT - icon_size) * 0.5,
+            width: icon_size,
+            height: icon_size,
+        };
+        icons.render(
+            d,
+            Icon::Close,
+            Vector2::new(close_rect.x, close_rect.y),
+            palette.close,
+        );
+
+        if let Some(pf) = project.parsed.get(&self.file) {
+            draw_code(d, font, pf, self, project, palette, pan, zoom);
+        }
+    }
+}
+
+pub fn draw_code(
+    d: &mut RaylibDrawHandle,
+    font: &AppFont,
+    file: &ParsedFile,
+    win: &CodeWindow,
+    project: &ProjectModel,
+    palette: &Palette,
+    pan: Vector2,
+    zoom: f32,
+) {
+    let content_rect = win.content_rect_at(Vector2::new(0.0, 0.0));
+    if content_rect.width <= 0.0 || content_rect.height <= 0.0 {
+        return;
+    }
+
+    let metrics = content_metrics(file, win);
+    let scissor_w = (content_rect.width
+        - if metrics.show_v {
+            SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
+        } else {
+            0.0
+        })
+    .max(1.0);
+    let scissor_h = (content_rect.height
+        - if metrics.show_h {
+            SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
+        } else {
+            0.0
+        })
+    .max(1.0);
+    let screen_scissor = world_to_screen_rect(
+        Rectangle {
+            x: content_rect.x,
+            y: content_rect.y,
+            width: scissor_w,
+            height: scissor_h,
+        },
+        pan,
+        zoom,
+    );
+    let mut scoped = d.begin_scissor_mode(
+        screen_scissor.x as i32,
+        screen_scissor.y as i32,
+        screen_scissor.width as i32,
+        screen_scissor.height as i32,
+    );
+
+    let mut breadcrumb = project.display_name(&file.path);
+    if let Some(mod_path) = file.defs.first().map(|d| d.module_path.as_str()) {
+        breadcrumb.push_str(" - ");
+        breadcrumb.push_str(mod_path);
+    }
+    font.draw_text_ex(
+        &mut scoped,
+        &breadcrumb,
+        Vector2::new(content_rect.x + 8.0, content_rect.y + 2.0),
+        FONT_SIZE - 2.0,
+        0.0,
+        palette.breadcrumb,
+    );
+
+    let start_y = content_rect.y + BREADCRUMB_HEIGHT;
+    let text_area_height = metrics.avail_height;
+    let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
+    let lines_visible = ((text_area_height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
+    let bottom = (top_visible + lines_visible + 1).min(file.lines.len());
+    let mut y = start_y - (win.scroll % LINE_HEIGHT);
+
+    let gutter_width = CODE_X_OFFSET - 4.0;
+    scoped.draw_rectangle(
+        content_rect.x as i32,
+        start_y as i32,
+        gutter_width as i32,
+        (metrics.avail_height + LINE_HEIGHT) as i32,
+        palette.window,
+    );
+
+    for idx in top_visible..bottom {
+        let line = &file.lines[idx];
+        let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
+
+        let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
+        let segments = colorize_line(line, &calls);
+        draw_segments(&mut scoped, font, text_start_x, y, &segments, palette);
+
+        font.draw_text_ex(
+            &mut scoped,
+            &format!("{:>4}", idx + 1),
+            Vector2::new(content_rect.x + 4.0, y),
+            FONT_SIZE - 2.0,
+            0.0,
+            palette.line_num,
+        );
+        y += LINE_HEIGHT;
+    }
+    drop(scoped);
+
+    if let Some(mini) = win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0)) {
+        d.draw_rectangle(
+            mini.x as i32,
+            mini.y as i32,
+            mini.width as i32,
+            mini.height as i32,
+            palette.window,
+        );
+        let scale = mini.height / metrics.total_height.max(1.0);
+        let line_scale = (scale * LINE_HEIGHT).max(1.0);
+        let block_height = (line_scale * 0.7).clamp(1.0, line_scale);
+        let max_width = (mini.width - 4.0).max(1.0);
+        let mini_scissor = world_to_screen_rect(mini, pan, zoom);
+        let mut scoped = d.begin_scissor_mode(
+            mini_scissor.x as i32,
+            mini_scissor.y as i32,
+            mini_scissor.width as i32,
+            mini_scissor.height as i32,
+        );
+        for (idx, line) in file.lines.iter().enumerate() {
+            let line_y = mini.y + idx as f32 * line_scale;
+            if line_y > mini.y + mini.height {
+                break;
+            }
+            let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
+            let segments = colorize_line(line, &calls);
+            let mut x = mini.x + 2.0;
+            for (text, color) in segments {
+                let width = font
+                    .measure_width(&text, FONT_SIZE, 0.0)
+                    .max(text.len() as f32 * 4.0);
+                let w = (width / metrics.max_width.max(1.0)) * max_width;
+                if w <= 0.5 {
+                    continue;
+                }
+                let c = match color {
+                    ColorKind::Text => palette.text,
+                    ColorKind::Comment => palette.comment,
+                    ColorKind::String => palette.string,
+                    ColorKind::Keyword => palette.keyword,
+                    ColorKind::Call => palette.call,
+                };
+                scoped.draw_rectangle(x as i32, line_y as i32, w as i32, block_height as i32, c);
+                x += w;
+                if x > mini.x + mini.width - 2.0 {
+                    break;
+                }
+            }
+        }
+        drop(scoped);
+
+        let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
+        let view_y = mini.y + win.scroll * scale;
+        d.draw_rectangle(
+            mini.x as i32,
+            view_y as i32,
+            mini.width as i32,
+            view_h as i32,
+            palette.sidebar_highlight,
+        );
+        d.draw_rectangle_lines(
+            mini.x as i32,
+            mini.y as i32,
+            mini.width as i32,
+            mini.height as i32,
+            palette.title,
+        );
+    }
+
+    if metrics.show_v {
+        let track_x = content_rect.x + content_rect.width - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+        let track_y = content_rect.y + BREADCRUMB_HEIGHT;
+        let track_h = metrics.avail_height;
+        d.draw_rectangle(
+            track_x as i32,
+            track_y as i32,
+            SCROLLBAR_THICKNESS as i32,
+            track_h as i32,
+            palette.search_bg,
+        );
+        let scroll_range = metrics.max_scroll_y().max(1.0);
+        let denom = metrics.total_height.max(1.0);
+        let thumb_h = (metrics.avail_height / denom * track_h).clamp(SCROLLBAR_MIN_THUMB, track_h);
+        let thumb_y = track_y + (win.scroll / scroll_range) * (track_h - thumb_h);
+        d.draw_rectangle(
+            track_x as i32,
+            thumb_y as i32,
+            SCROLLBAR_THICKNESS as i32,
+            thumb_h as i32,
+            palette.sidebar_highlight,
+        );
+    }
+
+    if metrics.show_h {
+        let track_x = content_rect.x + CODE_X_OFFSET;
+        let track_y = content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+        let track_w = metrics.avail_width;
+        d.draw_rectangle(
+            track_x as i32,
+            track_y as i32,
+            track_w as i32,
+            SCROLLBAR_THICKNESS as i32,
+            palette.search_bg,
+        );
+        let scroll_range = metrics.max_scroll_x().max(1.0);
+        let denom = metrics.max_width.max(1.0);
+        let thumb_w =
+            (metrics.avail_width / denom * track_w).clamp(SCROLLBAR_MIN_THUMB, track_w);
+        let thumb_x = track_x + (win.scroll_x / scroll_range) * (track_w - thumb_w);
+        d.draw_rectangle(
+            thumb_x as i32,
+            track_y as i32,
+            thumb_w as i32,
+            SCROLLBAR_THICKNESS as i32,
+            palette.sidebar_highlight,
+        );
+    }
+}
+
+pub fn hit_test_calls(
+    font: &AppFont,
+    file: &ParsedFile,
+    win: &CodeWindow,
+    mouse: Vector2,
+    project: &ProjectModel,
+) -> Option<DefinitionLocation> {
+    let content_rect = win.content_rect_at(Vector2::new(0.0, 0.0));
+    let content_top = content_rect.y + BREADCRUMB_HEIGHT;
+    let local_y = mouse.y - content_top + win.scroll;
+    if local_y < 0.0 {
+        return None;
+    }
+    let line_idx = (local_y / LINE_HEIGHT).floor() as usize;
+    if line_idx >= file.lines.len() {
+        return None;
+    }
+    let line = &file.lines[line_idx];
+    let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
+    if calls.is_empty() {
+        return None;
+    }
+
+    for call in calls {
+        let rect = token_rect(
+            font,
+            line,
+            call.col,
+            call.len,
+            content_rect.x + CODE_X_OFFSET - win.scroll_x,
+            content_top + (line_idx as f32 * LINE_HEIGHT) - win.scroll,
+        );
+        if point_in_rect(mouse, rect) {
+            if let Some(defs) = project.defs.get(&call.name) {
+                if let Some(exact) = defs.iter().find(|d| d.module_path == call.module_path) {
+                    return Some(exact.clone());
+                }
+                return defs.first().cloned();
+            }
+        }
+    }
+
+    None
 }
