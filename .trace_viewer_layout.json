@@ -1,16 +1,39 @@
 {
   "windows": [
     {
-      "file": "src/code_window.rs",
+      "file": "src/main.rs",
       "view_kind": {
         "type": "SingleFn",
-        "start": 201,
-        "end": 224,
-        "title": "minimap_rect_at"
+        "start": 32,
+        "end": 47,
+        "title": "draw_text_ex"
       },
       "position": [
-        1025.6953,
-        -195.63672
+        1191.6797,
+        90.57422
+      ],
+      "size": [
+        720.0,
+        393.36328
+      ],
+      "scroll": 0.0,
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src/main.rs",
+        "line": 43
+      }
+    },
+    {
+      "file": "src/main.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 165,
+        "end": 193,
+        "title": "load_monospace_font"
+      },
+      "position": [
+        1231.8086,
+        520.2539
       ],
       "size": [
         720.0,
@@ -19,45 +42,22 @@
       "scroll": 0.0,
       "scroll_x": 0.0,
       "link_from": {
-        "file": "src/app.rs",
-        "line": 1199
+        "file": "src/main.rs",
+        "line": 83
       }
     },
     {
-      "file": "src/app.rs",
-      "view_kind": {
-        "type": "SingleFn",
-        "start": 959,
-        "end": 1039,
-        "title": "draw"
-      },
-      "position": [
-        1064.6523,
-        485.38672
-      ],
-      "size": [
-        720.0,
-        460.0
-      ],
-      "scroll": 0.0,
-      "scroll_x": 0.0,
-      "link_from": {
-        "file": "src/app.rs",
-        "line": 1030
-      }
-    },
-    {
-      "file": "src/app.rs",
+      "file": "src/main.rs",
       "view_kind": null,
       "position": [
-        154.57031,
-        -139.3086
+        285.3125,
+        -13.808594
       ],
       "size": [
-        674.125,
-        1065.6328
+        738.97656,
+        1276.1211
       ],
-      "scroll": 19736.0,
+      "scroll": 227.71645,
       "scroll_x": 0.0,
       "link_from": null
     }
