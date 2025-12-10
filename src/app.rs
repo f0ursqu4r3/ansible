@@ -1266,6 +1266,7 @@ impl AppState {
             };
             scroll = (local_line as f32 * LINE_HEIGHT - 40.0).max(0.0);
         }
+        let win_size = Vector2::new(720.0, 460.0);
         let mut win = CodeWindow {
             file: path.clone(),
             title,
@@ -1274,8 +1275,11 @@ impl AppState {
             def_refs: Vec::new(),
             call_refs: Vec::new(),
             link_from: origin,
-            position: pos,
-            size: Vector2::new(720.0, 460.0),
+            position: self
+                .last_mouse_world
+                .map(|m| Vector2::new(m.x - win_size.x * 0.5, m.y - TITLE_BAR_HEIGHT * 0.5))
+                .unwrap_or(pos),
+            size: win_size,
             scroll,
             scroll_x: 0.0,
             is_dragging: false,
