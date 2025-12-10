@@ -393,7 +393,7 @@ pub fn draw_code(
     );
 
     for idx in top_visible..bottom {
-        let line = &file.lines[idx];
+        let _line = &file.lines[idx];
         let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
 
         let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
@@ -431,7 +431,7 @@ pub fn draw_code(
             mini_scissor.width as i32,
             mini_scissor.height as i32,
         );
-        for (idx, line) in file.lines.iter().enumerate() {
+        for (idx, _line) in file.lines.iter().enumerate() {
             let line_y = mini.y + idx as f32 * line_scale;
             if line_y > mini.y + mini.height {
                 break;

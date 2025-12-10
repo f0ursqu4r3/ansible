@@ -658,8 +658,9 @@ impl AppState {
             width: MINIMAP_W,
             height: MINIMAP_H,
         };
+        let button_row = MINIMAP_BTN_H + MINIMAP_BTN_GAP + 2.0;
         let avail_w = (rect.width - MINIMAP_PAD * 2.0).max(1.0);
-        let avail_h = (rect.height - MINIMAP_PAD * 2.0).max(1.0);
+        let avail_h = (rect.height - MINIMAP_PAD * 2.0 - button_row).max(1.0);
         let scale = (avail_w / bounds.width)
             .min(avail_h / bounds.height)
             .max(0.01);
@@ -762,10 +763,11 @@ impl AppState {
             );
         }
 
+        let canvas_w = (d.get_screen_width() as f32 - SIDEBAR_WIDTH).max(0.0);
         let view_rect = Rectangle {
-            x: -self.pan.x,
+            x: -self.pan.x + SIDEBAR_WIDTH / self.zoom,
             y: -self.pan.y,
-            width: d.get_screen_width() as f32 / self.zoom,
+            width: canvas_w / self.zoom,
             height: d.get_screen_height() as f32 / self.zoom,
         };
         let vx = ctx.origin.x + (view_rect.x - ctx.bounds.x) * ctx.scale;
