@@ -284,6 +284,7 @@ impl AppState {
         backspace: bool,
         shift_down: bool,
         ctrl_down: bool,
+        space_down: bool,
         screen_w: f32,
         screen_h: f32,
     ) {
@@ -293,10 +294,23 @@ impl AppState {
             return;
         }
 
-        let world_mouse = Vector2::new(
-            mouse.x / self.zoom - self.pan.x,
-            mouse.y / self.zoom - self.pan.y,
-        );
+        let pan_initiated = middle_pressed || (space_down && left_pressed);
+        if pan_initiated {
+            self.pan_dragging = true;
+            self.pan_anchor = mouse;
+            self.pan_start = self.pan;
+        }
+        let pan_active = middle_down || (space_down && left_down);
+        if !pan_active {
+            self.pan_dragging = false;
+        }
+
+        if self.pan_dragging {
+            let dx = (mouse.x - self.pan_anchor.x) / self.zoom;
+            let dy = (mouse.y - self.pan_anchor.y) / self.zoom;
+            self.pan = Vector2::new(self.pan_start.x + dx, self.pan_start.y + dy);
+            return;
+        }
 
         let minimap_ctx = self.minimap_context(screen_w, screen_h);
         if let Some(ctx) = minimap_ctx {
@@ -333,21 +347,10 @@ impl AppState {
             }
         }
 
-        if middle_pressed {
-            self.pan_dragging = true;
-            self.pan_anchor = mouse;
-            self.pan_start = self.pan;
-        }
-        if !middle_down {
-            self.pan_dragging = false;
-        }
-
-        if self.pan_dragging {
-            let dx = (mouse.x - self.pan_anchor.x) / self.zoom;
-            let dy = (mouse.y - self.pan_anchor.y) / self.zoom;
-            self.pan = Vector2::new(self.pan_start.x + dx, self.pan_start.y + dy);
-            return;
-        }
+        let world_mouse = Vector2::new(
+            mouse.x / self.zoom - self.pan.x,
+            mouse.y / self.zoom - self.pan.y,
+        );
 
         if !left_down {
             for w in &mut self.windows {
@@ -805,7 +808,11 @@ impl AppState {
     }
 
     pub fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
-        let mut hover_cursor: Option<MouseCursor> = None;
+        let mut hover_cursor: Option<MouseCursor> = if self.pan_dragging {
+            Some(MouseCursor::MOUSE_CURSOR_RESIZE_ALL)
+        } else {
+            None
+        };
         d.clear_background(self.palette.bg);
         let camera = Camera2D {
             offset: Vector2::new(0.0, 0.0),
@@ -816,8 +823,10 @@ impl AppState {
         {
             let mut scoped = d.begin_mode2D(camera);
             for idx in 0..self.windows.len() {
-                if let Some(edges) = self.windows[idx].hover_edges {
-                    hover_cursor = Some(cursor_for_edges(edges));
+                if hover_cursor.is_none() {
+                    if let Some(edges) = self.windows[idx].hover_edges {
+                        hover_cursor = Some(cursor_for_edges(edges));
+                    }
                 }
                 let is_top = idx + 1 == self.windows.len();
                 self.windows[idx].draw_window(

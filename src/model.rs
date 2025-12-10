@@ -6,9 +6,9 @@ use syn::visit::Visit;
 use walkdir::WalkDir;
 
 use once_cell::sync::Lazy;
+use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, Theme};
 use syntect::parsing::SyntaxSet;
-use syntect::easy::HighlightLines;
 
 use crate::theme::Palette;
 use raylib::prelude::Color as RayColor;
@@ -140,11 +140,7 @@ fn load_theme() -> Option<Theme> {
         .map(PathBuf::from)
         .or_else(|| {
             let p = PathBuf::from("data/themes/Tomorrow-Night-Eighties.tmtheme");
-            if p.exists() {
-                Some(p)
-            } else {
-                None
-            }
+            if p.exists() { Some(p) } else { None }
         })?;
     let folder = path.parent()?;
     let ts = syntect::highlighting::ThemeSet::load_from_folder(folder).ok()?;
@@ -191,7 +187,14 @@ pub fn colorized_segments_with_calls(
         return Vec::new();
     }
     let line = &pf.lines[line_idx];
-    let mut spans: Vec<(usize, usize, RayColor)> = pf.spans.get(line_idx).cloned().unwrap_or_default().into_iter().map(|s| (s.start, s.end, s.color)).collect();
+    let mut spans: Vec<(usize, usize, RayColor)> = pf
+        .spans
+        .get(line_idx)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| (s.start, s.end, s.color))
+        .collect();
 
     let mut call_ranges: Vec<(usize, usize)> = calls.iter().map(|c| (c.col, c.len)).collect();
     call_ranges.sort_by_key(|r| r.0);

@@ -85,6 +85,7 @@ fn main() -> Result<()> {
             || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
         let ctrl_down = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
             || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
+        let space_down = rl.is_key_down(KeyboardKey::KEY_SPACE);
 
         let typed = collect_typed_chars(&mut rl);
         let backspace = rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE);
@@ -100,6 +101,7 @@ fn main() -> Result<()> {
             backspace,
             shift_down,
             ctrl_down,
+            space_down,
             rl.get_screen_width() as f32,
             rl.get_screen_height() as f32,
         );

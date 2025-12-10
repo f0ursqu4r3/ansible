@@ -5,7 +5,7 @@ use raylib::prelude::*;
 use crate::constants::{BREADCRUMB_HEIGHT, CODE_X_OFFSET, LINE_HEIGHT, TITLE_BAR_HEIGHT};
 use crate::icons::{Icon, Icons};
 use crate::model::{
-    colorized_segments_with_calls, DefinitionLocation, FunctionCall, ParsedFile, ProjectModel,
+    DefinitionLocation, FunctionCall, ParsedFile, ProjectModel, colorized_segments_with_calls,
 };
 use crate::theme::Palette;
 use crate::{AppFont, FONT_SIZE, draw_segments, point_in_rect, token_rect};
@@ -175,11 +175,7 @@ impl CodeWindow {
         self.minimap_rect_at(metrics, Vector2::new(0.0, 0.0))
     }
 
-    pub fn minimap_rect_at(
-        &self,
-        metrics: &ContentMetrics,
-        offset: Vector2,
-    ) -> Option<Rectangle> {
+    pub fn minimap_rect_at(&self, metrics: &ContentMetrics, offset: Vector2) -> Option<Rectangle> {
         let content = self.content_rect_at(offset);
         let gutter = if metrics.show_v {
             SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
@@ -506,7 +502,8 @@ pub fn draw_code(
 
     if metrics.show_h {
         let track_x = content_rect.x + CODE_X_OFFSET;
-        let track_y = content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
+        let track_y =
+            content_rect.y + content_rect.height - SCROLLBAR_THICKNESS - SCROLLBAR_PADDING;
         let track_w = metrics.avail_width;
         d.draw_rectangle(
             track_x as i32,
@@ -517,8 +514,7 @@ pub fn draw_code(
         );
         let scroll_range = metrics.max_scroll_x().max(1.0);
         let denom = metrics.max_width.max(1.0);
-        let thumb_w =
-            (metrics.avail_width / denom * track_w).clamp(SCROLLBAR_MIN_THUMB, track_w);
+        let thumb_w = (metrics.avail_width / denom * track_w).clamp(SCROLLBAR_MIN_THUMB, track_w);
         let thumb_x = track_x + (win.scroll_x / scroll_range) * (track_w - thumb_w);
         d.draw_rectangle(
             thumb_x as i32,
