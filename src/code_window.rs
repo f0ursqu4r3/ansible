@@ -399,7 +399,14 @@ impl CodeWindow {
         let radius = 0.01;
         let win_rect = self.rect_at(Vector2::new(0.0, 0.0));
         d.draw_rectangle_rounded(win_rect, radius, 10, bg);
-        d.draw_rectangle_rounded_lines(win_rect, radius, 10, palette.breadcrumb);
+        // Win border
+        let darker_bg = Color {
+            r: (bg.r as f32 * 0.5) as u8,
+            g: (bg.g as f32 * 0.5) as u8,
+            b: (bg.b as f32 * 0.5) as u8,
+            a: bg.a,
+        };
+        d.draw_rectangle_rounded_lines(win_rect, radius, 10, darker_bg);
 
         let title_rect = self.title_rect_at(Vector2::new(0.0, 0.0));
         d.draw_rectangle_rounded(
