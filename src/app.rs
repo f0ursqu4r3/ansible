@@ -18,6 +18,15 @@ use crate::theme::Palette;
 use crate::{AppFont, point_in_rect};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug)]
+struct CallLink {
+    points: [Vector2; 4],
+    caller_idx: usize,
+    line: usize,
+    hovered: bool,
+    target_idx: usize,
+}
+
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 1.0;
 const MINIMAP_W: f32 = 220.0;
@@ -84,6 +93,8 @@ pub struct AppState {
     last_click_time: Option<Instant>,
     last_click_pos: Option<Vector2>,
     last_click_window: Option<usize>,
+    call_links: Vec<CallLink>,
+    last_link_cycle: Option<(Vector2, usize)>, // click pos, index in group
 }
 
 struct MinimapContext {
@@ -129,6 +140,8 @@ impl AppState {
             last_click_time: None,
             last_click_pos: None,
             last_click_window: None,
+            call_links: Vec::new(),
+            last_link_cycle: None,
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -399,6 +412,41 @@ impl AppState {
                 self.last_mouse_world = Some(world_mouse);
             }
             return;
+        }
+
+        if left_pressed {
+            if let Some((link_idx, group_len)) = self.hit_call_link(world_mouse) {
+                if let Some(link) = self.call_links.get(link_idx) {
+                    let caller_idx = link.caller_idx;
+                    if caller_idx < self.windows.len() {
+                        let mut scrolled = false;
+                        {
+                            let win = &mut self.windows[caller_idx];
+                            if self.project.parsed.contains_key(&win.file) {
+                                let line = link.line;
+                                let local_line = match win.view_kind {
+                                    CodeViewKind::SingleFn { start, .. } => {
+                                        line.saturating_sub(start)
+                                    }
+                                    _ => line,
+                                };
+                                let max_scroll = code_window::metrics_for(&self.project, win)
+                                    .map(|m| m.max_scroll_y())
+                                    .unwrap_or(0.0);
+                                win.scroll = (local_line as f32 * LINE_HEIGHT - 40.0)
+                                    .clamp(0.0, max_scroll);
+                                win.focus_line = Some(line);
+                                scrolled = true;
+                            }
+                        }
+                        if scrolled {
+                            self.bring_to_front(caller_idx);
+                            self.last_link_cycle = Some((world_mouse, (link_idx + 1) % group_len));
+                            return;
+                        }
+                    }
+                }
+            }
         }
 
         let pan_initiated = middle_pressed || (space_down && left_pressed);
@@ -935,7 +983,7 @@ impl AppState {
         };
         {
             let mut scoped = d.begin_mode2D(camera);
-            self.draw_call_links(&mut scoped);
+            self.draw_call_links(&mut scoped, world_mouse);
             for idx in 0..self.windows.len() {
                 if hover_cursor.is_none() {
                     if let Some(edges) = self.windows[idx].hover_edges {
@@ -943,7 +991,13 @@ impl AppState {
                     }
                 }
                 if hover_cursor.is_none() {
-                    if let Some(pf) = self.project.parsed.get(&self.windows[idx].file) {
+                    if self
+                        .call_links
+                        .iter()
+                        .any(|l| l.hovered && min_distance_to_cubic(&l.points, world_mouse) <= 10.0)
+                    {
+                        hover_cursor = Some(MouseCursor::MOUSE_CURSOR_POINTING_HAND);
+                    } else if let Some(pf) = self.project.parsed.get(&self.windows[idx].file) {
                         if code_window::is_over_call(
                             font,
                             pf,
@@ -993,7 +1047,8 @@ impl AppState {
         }
     }
 
-    fn draw_call_links(&self, d: &mut RaylibMode2D<RaylibDrawHandle>) {
+    fn draw_call_links(&mut self, d: &mut RaylibMode2D<RaylibDrawHandle>, world_mouse: Vector2) {
+        self.call_links.clear();
         let mut fn_windows = Vec::new();
         for (idx, win) in self.windows.iter().enumerate() {
             if let CodeViewKind::SingleFn { start, .. } = win.view_kind {
@@ -1003,7 +1058,6 @@ impl AppState {
             }
         }
 
-        let mut edges = Vec::new();
         let mut highlights = Vec::new();
         for (fn_idx, fn_name, fn_module, _fn_start) in fn_windows {
             let fn_win = &self.windows[fn_idx];
@@ -1063,21 +1117,41 @@ impl AppState {
                     .line_anchor(caller_pf, line, true)
                     .unwrap_or_else(|| caller_win.center_anchor(true));
                 let end_pt = fn_win.center_anchor(false);
-                edges.push((start_pt, end_pt));
+                let dx = (end_pt.x - start_pt.x).abs().max(40.0);
+                let dir = if end_pt.x >= start_pt.x { 1.0 } else { -1.0 };
+                let handle = dx * 0.35;
+                let c1 = Vector2::new(start_pt.x + dir * handle, start_pt.y);
+                let c2 = Vector2::new(end_pt.x - dir * handle, end_pt.y);
+                let points = [start_pt, c1, c2, end_pt];
+                let hovered = min_distance_to_cubic(&points, world_mouse) <= 10.0;
+                self.call_links.push(CallLink {
+                    points,
+                    caller_idx,
+                    line,
+                    hovered,
+                    target_idx: fn_idx,
+                });
                 if let Some(rect) = caller_win.call_highlight_rect(caller_pf, line, true) {
                     highlights.push((rect, caller_idx));
                 }
             }
         }
-
-        for (start_pt, end_pt) in edges {
-            let dx = (end_pt.x - start_pt.x).abs().max(40.0);
-            let dir = if end_pt.x >= start_pt.x { 1.0 } else { -1.0 };
-            let handle = dx * 0.35;
-            let c1 = Vector2::new(start_pt.x + dir * handle, start_pt.y);
-            let c2 = Vector2::new(end_pt.x - dir * handle, end_pt.y);
-            let points = [start_pt, c1, c2, end_pt];
-            d.draw_spline_bezier_cubic(&points, 2.5, self.palette.sidebar_highlight);
+        let active_idx = self.windows.len().saturating_sub(1);
+        let active_is_fn = self
+            .windows
+            .get(active_idx)
+            .map(|w| matches!(w.view_kind, CodeViewKind::SingleFn { .. }))
+            .unwrap_or(false);
+        for link in &self.call_links {
+            let active_link = active_is_fn && link.target_idx == active_idx;
+            let color = if link.hovered {
+                self.palette.close
+            } else if active_link {
+                self.palette.title
+            } else {
+                self.palette.sidebar_highlight
+            };
+            d.draw_spline_bezier_cubic(&link.points, 2.5, color);
         }
 
         for (rect, _idx) in highlights {
@@ -1351,6 +1425,53 @@ impl AppState {
     }
 }
 
+impl AppState {
+    fn hit_call_link(&mut self, world_mouse: Vector2) -> Option<(usize, usize)> {
+        let tolerance = 10.0;
+        let mut hits: Vec<usize> = self
+            .call_links
+            .iter()
+            .enumerate()
+            .filter_map(|(i, link)| {
+                let dist = min_distance_to_cubic(&link.points, world_mouse);
+                if dist <= tolerance {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if hits.is_empty() {
+            return None;
+        }
+        hits.sort();
+        let mut chosen = hits[0];
+        // Decide cycling direction based on mouse position relative to the caller window.
+        let mut dir: isize = 1;
+        if let Some(link) = self.call_links.get(chosen) {
+            if let Some(win) = self.windows.get(link.caller_idx) {
+                let center_y = win.position.y + win.size.y * 0.5;
+                dir = if world_mouse.y < center_y { -1 } else { 1 };
+            }
+        }
+        if let Some((last_pos, last_idx)) = self.last_link_cycle {
+            let dx = last_pos.x - world_mouse.x;
+            let dy = last_pos.y - world_mouse.y;
+            if dx * dx + dy * dy < tolerance * tolerance {
+                if let Some(pos) = hits.iter().position(|i| *i == last_idx) {
+                    let next_pos = if dir < 0 {
+                        (pos + hits.len() - 1) % hits.len()
+                    } else {
+                        (pos + 1) % hits.len()
+                    };
+                    chosen = hits[next_pos];
+                }
+            }
+        }
+        Some((chosen, hits.len()))
+    }
+}
+
 #[derive(Clone, Debug)]
 enum WindowAction {
     None,
@@ -1393,4 +1514,43 @@ fn cursor_for_edges(edges: (bool, bool, bool, bool)) -> MouseCursor {
         }
         _ => MouseCursor::MOUSE_CURSOR_DEFAULT,
     }
+}
+
+fn min_distance_to_cubic(points: &[Vector2; 4], p: Vector2) -> f32 {
+    let mut min_d2 = f32::MAX;
+    let mut prev = points[0];
+    let steps = 24;
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        let cur = cubic_point(points, t);
+        let d2 = dist2_point_segment(p, prev, cur);
+        if d2 < min_d2 {
+            min_d2 = d2;
+        }
+        prev = cur;
+    }
+    min_d2.sqrt()
+}
+
+fn cubic_point(p: &[Vector2; 4], t: f32) -> Vector2 {
+    let mt = 1.0 - t;
+    let mt2 = mt * mt;
+    let t2 = t * t;
+    Vector2::new(
+        mt2 * mt * p[0].x + 3.0 * mt2 * t * p[1].x + 3.0 * mt * t2 * p[2].x + t2 * t * p[3].x,
+        mt2 * mt * p[0].y + 3.0 * mt2 * t * p[1].y + 3.0 * mt * t2 * p[2].y + t2 * t * p[3].y,
+    )
+}
+
+fn dist2_point_segment(p: Vector2, a: Vector2, b: Vector2) -> f32 {
+    let ab = b - a;
+    let ap = p - a;
+    let ab_len2 = ab.x * ab.x + ab.y * ab.y;
+    if ab_len2 <= f32::EPSILON {
+        return ap.x * ap.x + ap.y * ap.y;
+    }
+    let t = ((ap.x * ab.x + ap.y * ab.y) / ab_len2).clamp(0.0, 1.0);
+    let proj = Vector2::new(a.x + ab.x * t, a.y + ab.y * t);
+    let d = p - proj;
+    d.x * d.x + d.y * d.y
 }

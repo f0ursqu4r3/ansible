@@ -2,21 +2,6 @@
   "windows": [
     {
       "file": "src/app.rs",
-      "view_kind": null,
-      "position": [
-        284.0,
-        40.0
-      ],
-      "size": [
-        1026.9219,
-        1243.8789
-      ],
-      "scroll": 12380.157,
-      "scroll_x": 0.0,
-      "link_from": null
-    },
-    {
-      "file": "src/app.rs",
       "view_kind": {
         "type": "SingleFn",
         "start": 259,
@@ -37,6 +22,44 @@
         "file": "src/app.rs",
         "line": 667
       }
+    },
+    {
+      "file": "src/code_window.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 152,
+        "end": 158,
+        "title": "clamp_window_scroll"
+      },
+      "position": [
+        2328.5583,
+        531.7672
+      ],
+      "size": [
+        720.0,
+        460.0
+      ],
+      "scroll": 0.0,
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src/app.rs",
+        "line": 278
+      }
+    },
+    {
+      "file": "src/app.rs",
+      "view_kind": null,
+      "position": [
+        284.0,
+        40.0
+      ],
+      "size": [
+        1026.9219,
+        1243.8789
+      ],
+      "scroll": 13688.001,
+      "scroll_x": 0.0,
+      "link_from": null
     }
   ],
   "sidebar_scroll": 0.0,
