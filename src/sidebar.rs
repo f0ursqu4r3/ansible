@@ -500,5 +500,12 @@ impl SidebarState {
                 palette.sidebar_highlight,
             );
         }
+        d.draw_line(
+            SIDEBAR_WIDTH as i32,
+            0,
+            SIDEBAR_WIDTH as i32,
+            d.get_screen_height(),
+            palette.breadcrumb,
+        );
     }
 }
