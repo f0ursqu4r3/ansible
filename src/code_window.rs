@@ -28,6 +28,7 @@ pub struct CodeWindow {
     pub title: String,
     pub focus_line: Option<usize>,
     pub view_kind: CodeViewKind,
+    pub link_from: Option<CallOrigin>,
     pub position: Vector2,
     pub size: Vector2,
     pub scroll: f32,
@@ -49,6 +50,12 @@ pub struct CodeWindow {
 pub enum CodeViewKind {
     FullFile,
     SingleFn { start: usize, end: usize },
+}
+
+#[derive(Clone, Debug)]
+pub struct CallOrigin {
+    pub file: PathBuf,
+    pub line: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -197,6 +204,65 @@ impl CodeWindow {
             y: content.y + BREADCRUMB_HEIGHT,
             width,
             height,
+        })
+    }
+
+    pub fn line_anchor(&self, pf: &ParsedFile, line: usize, prefer_right: bool) -> Option<Vector2> {
+        let (start, end) = self.view_range(pf);
+        if line > end {
+            return None;
+        }
+        let content = self.content_rect_at(Vector2::new(0.0, 0.0));
+        let area_top = content.y + BREADCRUMB_HEIGHT;
+        let area_bottom = content.y + content.height;
+        let local_idx = line.saturating_sub(start);
+        let base_y = area_top + local_idx as f32 * LINE_HEIGHT - self.scroll + LINE_HEIGHT * 0.5;
+        let y = base_y.clamp(area_top, area_bottom);
+        let x = if prefer_right {
+            content.x + content.width
+        } else {
+            content.x
+        };
+        Some(Vector2::new(x, y))
+    }
+
+    pub fn center_anchor(&self, prefer_right: bool) -> Vector2 {
+        let content = self.content_rect_at(Vector2::new(0.0, 0.0));
+        let x = if prefer_right {
+            content.x + content.width
+        } else {
+            content.x
+        };
+        Vector2::new(x, content.y + content.height * 0.5)
+    }
+
+    pub fn call_highlight_rect(
+        &self,
+        pf: &ParsedFile,
+        line: usize,
+        prefer_right: bool,
+    ) -> Option<Rectangle> {
+        let (start, end) = self.view_range(pf);
+        if line > end {
+            return None;
+        }
+        let content = self.content_rect_at(Vector2::new(0.0, 0.0));
+        let area_top = content.y + BREADCRUMB_HEIGHT;
+        let local_idx = line.saturating_sub(start);
+        let y = area_top + local_idx as f32 * LINE_HEIGHT - self.scroll;
+        if y + LINE_HEIGHT < area_top || y > content.y + content.height {
+            return None;
+        }
+        let x = if prefer_right {
+            content.x + CODE_X_OFFSET - self.scroll_x
+        } else {
+            content.x + CODE_X_OFFSET - self.scroll_x
+        };
+        Some(Rectangle {
+            x,
+            y,
+            width: content.width - CODE_X_OFFSET,
+            height: LINE_HEIGHT,
         })
     }
 
@@ -559,7 +625,7 @@ pub fn hit_test_calls(
     win: &CodeWindow,
     mouse: Vector2,
     project: &ProjectModel,
-) -> Option<DefinitionLocation> {
+) -> Option<(DefinitionLocation, CallOrigin)> {
     let content_rect = win.content_rect_at(Vector2::new(0.0, 0.0));
     let (view_start, view_lines) = win.view_lines(file);
     let content_top = content_rect.y + BREADCRUMB_HEIGHT;
@@ -572,6 +638,7 @@ pub fn hit_test_calls(
         return None;
     }
     let line_idx = view_start + line_idx;
+    let local_idx = line_idx.saturating_sub(view_start);
     let line = &file.lines[line_idx];
     let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
     if calls.is_empty() {
@@ -585,17 +652,68 @@ pub fn hit_test_calls(
             call.col,
             call.len,
             content_rect.x + CODE_X_OFFSET - win.scroll_x,
-            content_top + (line_idx as f32 * LINE_HEIGHT) - win.scroll,
+            content_top + (local_idx as f32 * LINE_HEIGHT) - win.scroll,
         );
         if point_in_rect(mouse, rect) {
             if let Some(defs) = project.defs.get(&call.name) {
                 if let Some(exact) = defs.iter().find(|d| d.module_path == call.module_path) {
-                    return Some(exact.clone());
+                    return Some((
+                        exact.clone(),
+                        CallOrigin {
+                            file: file.path.clone(),
+                            line: line_idx,
+                        },
+                    ));
                 }
-                return defs.first().cloned();
+                if let Some(first) = defs.first() {
+                    return Some((
+                        first.clone(),
+                        CallOrigin {
+                            file: file.path.clone(),
+                            line: line_idx,
+                        },
+                    ));
+                }
             }
         }
     }
 
     None
+}
+
+pub fn is_over_call(font: &AppFont, file: &ParsedFile, win: &CodeWindow, mouse: Vector2) -> bool {
+    let content_rect = win.content_rect_at(Vector2::new(0.0, 0.0));
+    let (view_start, view_lines) = win.view_lines(file);
+    let content_top = content_rect.y + BREADCRUMB_HEIGHT;
+    let local_y = mouse.y - content_top + win.scroll;
+    if local_y < 0.0 {
+        return false;
+    }
+    let line_idx = (local_y / LINE_HEIGHT).floor() as usize;
+    if line_idx >= view_lines.len() {
+        return false;
+    }
+    let line_idx = view_start + line_idx;
+    let local_idx = line_idx.saturating_sub(view_start);
+    let line = &file.lines[line_idx];
+    let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
+    if calls.is_empty() {
+        return false;
+    }
+
+    for call in calls {
+        let rect = token_rect(
+            font,
+            line,
+            call.col,
+            call.len,
+            content_rect.x + CODE_X_OFFSET - win.scroll_x,
+            content_top + (local_idx as f32 * LINE_HEIGHT) - win.scroll,
+        );
+        if point_in_rect(mouse, rect) {
+            return true;
+        }
+    }
+
+    false
 }

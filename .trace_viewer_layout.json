@@ -1,56 +1,65 @@
 {
   "windows": [
     {
-      "file": "src/code_window.rs",
-      "view_kind": {
-        "type": "SingleFn",
-        "start": 130,
-        "end": 136,
-        "title": "code_window.rs - clamp_window_scroll"
-      },
-      "position": [
-        512.52734,
-        -350.23047
-      ],
-      "size": [
-        840.0117,
-        220.0
-      ],
-      "scroll": 0.0,
-      "scroll_x": 0.0
-    },
-    {
       "file": "src/app.rs",
       "view_kind": null,
       "position": [
-        -333.5547,
-        -607.9219
+        284.0,
+        40.0
       ],
       "size": [
-        802.15234,
-        769.21875
+        720.0,
+        1016.85156
       ],
-      "scroll": 2432.6401,
-      "scroll_x": 0.0
+      "scroll": 4251.346,
+      "scroll_x": 0.0,
+      "link_from": null
     },
     {
       "file": "src/app.rs",
       "view_kind": {
         "type": "SingleFn",
-        "start": 125,
-        "end": 128,
-        "title": "app.rs - layout_path"
+        "start": 91,
+        "end": 102,
+        "title": "app.rs - single_fn_title"
       },
       "position": [
-        525.41394,
-        -76.07367
+        1134.5547,
+        438.4414
       ],
       "size": [
         720.0,
         460.0
       ],
       "scroll": 0.0,
-      "scroll_x": 0.0
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src/app.rs",
+        "line": 166
+      }
+    },
+    {
+      "file": "src/app.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 133,
+        "end": 136,
+        "title": "app.rs - layout_path"
+      },
+      "position": [
+        1316.4375,
+        101.38281
+      ],
+      "size": [
+        530.09375,
+        220.0
+      ],
+      "scroll": 0.0,
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src/app.rs",
+        "line": 138
+      }
     }
   ],
   "sidebar_scroll": 0.0,

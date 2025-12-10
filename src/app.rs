@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use raylib::prelude::*;
 
 use crate::code_window::{
-    self, CodeViewKind, CodeWindow, MIN_WINDOW_H, MIN_WINDOW_W, SCROLLBAR_MIN_THUMB,
+    self, CallOrigin, CodeViewKind, CodeWindow, MIN_WINDOW_H, MIN_WINDOW_W, SCROLLBAR_MIN_THUMB,
     SCROLLBAR_PADDING, SCROLLBAR_THICKNESS,
 };
 use crate::constants::{
@@ -36,6 +36,8 @@ struct SavedWindow {
     scroll: f32,
     #[serde(default)]
     scroll_x: f32,
+    #[serde(default)]
+    link_from: Option<SavedCallOrigin>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -56,6 +58,12 @@ enum SavedViewKind {
         end: usize,
         title: String,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedCallOrigin {
+    file: String,
+    line: usize,
 }
 
 pub struct AppState {
@@ -167,6 +175,12 @@ impl AppState {
                     title,
                     focus_line: None,
                     view_kind,
+                    link_from: saved.link_from.and_then(|orig| {
+                        Some(CallOrigin {
+                            file: self.project.root.join(orig.file),
+                            line: orig.line,
+                        })
+                    }),
                     position: Vector2::new(saved.position.0, saved.position.1),
                     size: Vector2::new(saved.size.0, saved.size.1),
                     scroll: saved.scroll,
@@ -208,6 +222,10 @@ impl AppState {
                 size: (w.size.x, w.size.y),
                 scroll: w.scroll,
                 scroll_x: w.scroll_x,
+                link_from: w.link_from.as_ref().map(|o| SavedCallOrigin {
+                    file: self.project.display_name(&o.file),
+                    line: o.line,
+                }),
             })
             .collect();
         let mut sidebar_collapsed: Vec<String> = self
@@ -259,6 +277,7 @@ impl AppState {
                 .to_string(),
             focus_line: jump_to,
             view_kind: CodeViewKind::FullFile,
+            link_from: None,
             position: pos,
             size: Vector2::new(720.0, 460.0),
             scroll,
@@ -503,8 +522,8 @@ impl AppState {
                         WindowAction::Close => {
                             self.windows.pop();
                         }
-                        WindowAction::OpenDefinition(def) => {
-                            self.open_definition(def);
+                        WindowAction::OpenDefinition { def, origin } => {
+                            self.open_definition(def, origin);
                         }
                         WindowAction::StartDrag(offset) => {
                             if let Some(win) = self.windows.last_mut() {
@@ -827,6 +846,10 @@ impl AppState {
             None
         };
         d.clear_background(self.palette.bg);
+        let world_mouse = Vector2::new(
+            mouse.x / self.zoom - self.pan.x,
+            mouse.y / self.zoom - self.pan.y,
+        );
         let camera = Camera2D {
             offset: Vector2::new(0.0, 0.0),
             target: Vector2::new(-self.pan.x, -self.pan.y),
@@ -835,10 +858,18 @@ impl AppState {
         };
         {
             let mut scoped = d.begin_mode2D(camera);
+            self.draw_call_links(&mut scoped);
             for idx in 0..self.windows.len() {
                 if hover_cursor.is_none() {
                     if let Some(edges) = self.windows[idx].hover_edges {
                         hover_cursor = Some(cursor_for_edges(edges));
+                    }
+                }
+                if hover_cursor.is_none() {
+                    if let Some(pf) = self.project.parsed.get(&self.windows[idx].file) {
+                        if code_window::is_over_call(font, pf, &self.windows[idx], world_mouse) {
+                            hover_cursor = Some(MouseCursor::MOUSE_CURSOR_POINTING_HAND);
+                        }
                     }
                 }
                 let is_top = idx + 1 == self.windows.len();
@@ -868,6 +899,101 @@ impl AppState {
             &self.project.defs,
             &self.palette,
         );
+    }
+
+    fn draw_call_links(&self, d: &mut RaylibMode2D<RaylibDrawHandle>) {
+        let mut fn_windows = Vec::new();
+        for (idx, win) in self.windows.iter().enumerate() {
+            if let CodeViewKind::SingleFn { start, .. } = win.view_kind {
+                if let Some(pf) = self.project.parsed.get(&win.file) {
+                    if let Some(def) = pf.defs.iter().find(|d| d.line == start) {
+                        fn_windows.push((idx, def.name.clone(), def.module_path.clone(), start));
+                    }
+                }
+            }
+        }
+
+        let mut edges = Vec::new();
+        let mut highlights = Vec::new();
+        for (fn_idx, fn_name, fn_module, _fn_start) in fn_windows {
+            let fn_win = &self.windows[fn_idx];
+
+            let mut callers: Vec<(usize, usize)> = Vec::new();
+            if let Some(origin) = &fn_win.link_from {
+                if let Some(idx) = self.windows.iter().position(|w| w.file == origin.file) {
+                    if let Some(pf) = self.project.parsed.get(&origin.file) {
+                        let calls: Vec<&crate::model::FunctionCall> = pf
+                            .calls_on_line(origin.line)
+                            .filter(|c| c.name == fn_name)
+                            .collect();
+                        if !calls.is_empty() {
+                            if calls.iter().any(|c| c.module_path == fn_module) {
+                                callers.push((idx, origin.line));
+                            } else {
+                                callers.push((idx, origin.line));
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (idx, caller_win) in self.windows.iter().enumerate() {
+                if idx == fn_idx {
+                    continue;
+                }
+                let caller_pf = match self.project.parsed.get(&caller_win.file) {
+                    Some(pf) => pf,
+                    None => continue,
+                };
+                let mut matches: Vec<&crate::model::FunctionCall> = caller_pf
+                    .calls
+                    .iter()
+                    .filter(|c| c.name == fn_name)
+                    .collect();
+                if matches.is_empty() {
+                    continue;
+                }
+                if matches.iter().any(|c| c.module_path == fn_module) {
+                    matches.retain(|c| c.module_path == fn_module);
+                }
+                for call in matches {
+                    callers.push((idx, call.line));
+                }
+            }
+
+            callers.sort_by_key(|(idx, line)| (*idx, *line));
+            callers.dedup();
+
+            for (caller_idx, line) in callers {
+                let caller_win = &self.windows[caller_idx];
+                let caller_pf = match self.project.parsed.get(&caller_win.file) {
+                    Some(pf) => pf,
+                    None => continue,
+                };
+                let start_pt = caller_win
+                    .line_anchor(caller_pf, line, true)
+                    .unwrap_or_else(|| caller_win.center_anchor(true));
+                let end_pt = fn_win.center_anchor(false);
+                edges.push((start_pt, end_pt));
+                if let Some(rect) = caller_win.call_highlight_rect(caller_pf, line, true) {
+                    highlights.push((rect, caller_idx));
+                }
+            }
+        }
+
+        for (start_pt, end_pt) in edges {
+            let dx = (end_pt.x - start_pt.x).abs().max(40.0);
+            let dir = if end_pt.x >= start_pt.x { 1.0 } else { -1.0 };
+            let handle = dx * 0.35;
+            let c1 = Vector2::new(start_pt.x + dir * handle, start_pt.y);
+            let c2 = Vector2::new(end_pt.x - dir * handle, end_pt.y);
+            let points = [start_pt, c1, c2, end_pt];
+            d.draw_spline_bezier_cubic(&points, 2.5, self.palette.sidebar_highlight);
+        }
+
+        for (rect, _idx) in highlights {
+            d.draw_rectangle_lines_ex(rect, 1.0, self.palette.sidebar_highlight);
+        }
     }
 
     fn handle_window_click(
@@ -1000,10 +1126,13 @@ impl AppState {
                     return WindowAction::None;
                 }
             }
-            if let Some(def) =
+            if let Some((def, origin)) =
                 code_window::hit_test_calls(font, pf, win, world_mouse, &self.project)
             {
-                return WindowAction::OpenDefinition(def);
+                return WindowAction::OpenDefinition {
+                    def,
+                    origin: Some(origin),
+                };
             }
         }
 
@@ -1018,7 +1147,7 @@ impl AppState {
         self.windows.push(w);
     }
 
-    fn open_definition(&mut self, def: DefinitionLocation) {
+    fn open_definition(&mut self, def: DefinitionLocation, origin: Option<CallOrigin>) {
         let file_name = def
             .file
             .file_name()
@@ -1053,7 +1182,7 @@ impl AppState {
             )
         };
 
-        self.open_file_with_view(def.file, Some(def.line), title, view_kind);
+        self.open_file_with_view(def.file, Some(def.line), title, view_kind, origin);
     }
 
     fn open_file_with_view(
@@ -1062,6 +1191,7 @@ impl AppState {
         jump_to: Option<usize>,
         title: String,
         view_kind: CodeViewKind,
+        origin: Option<CallOrigin>,
     ) {
         if let Some(idx) = self
             .windows
@@ -1070,6 +1200,7 @@ impl AppState {
         {
             let mut win = self.windows.remove(idx);
             win.title = title.clone();
+            win.link_from = origin.clone().or(win.link_from);
             if let Some(line) = jump_to {
                 let local_line = match view_kind {
                     CodeViewKind::SingleFn { start, .. } => line.saturating_sub(start),
@@ -1101,6 +1232,7 @@ impl AppState {
             title,
             focus_line: jump_to,
             view_kind,
+            link_from: origin,
             position: pos,
             size: Vector2::new(720.0, 460.0),
             scroll,
@@ -1127,12 +1259,25 @@ impl AppState {
 enum WindowAction {
     None,
     Close,
-    OpenDefinition(DefinitionLocation),
+    OpenDefinition {
+        def: DefinitionLocation,
+        origin: Option<CallOrigin>,
+    },
     StartDrag(Vector2),
-    StartResize { edges: (bool, bool, bool, bool) },
-    StartVScroll { grab_offset: f32, ratio: f32 },
-    StartHScroll { grab_offset: f32, ratio: f32 },
-    StartMinimap { ratio: f32 },
+    StartResize {
+        edges: (bool, bool, bool, bool),
+    },
+    StartVScroll {
+        grab_offset: f32,
+        ratio: f32,
+    },
+    StartHScroll {
+        grab_offset: f32,
+        ratio: f32,
+    },
+    StartMinimap {
+        ratio: f32,
+    },
 }
 
 fn cursor_for_edges(edges: (bool, bool, bool, bool)) -> MouseCursor {
