@@ -97,8 +97,7 @@ impl AppState {
             .find(|d| d.line == start)
             .or_else(|| pf.defs.iter().find(|d| d.line > start))
             .map(|d| d.name.clone())?;
-        let file_name = file.file_name()?.to_str()?;
-        Some(format!("{file_name} - {func_name}"))
+        Some(func_name)
     }
 
     pub fn new(
@@ -170,7 +169,6 @@ impl AppState {
                     _ => CodeViewKind::FullFile,
                 };
                 let mut win = CodeWindow {
-                    id: self.next_window_id,
                     file,
                     title,
                     focus_line: None,
@@ -272,7 +270,6 @@ impl AppState {
             scroll = (line as f32 * LINE_HEIGHT - 40.0).max(0.0);
         }
         let mut win = CodeWindow {
-            id: self.next_window_id,
             file: path.clone(),
             title: path
                 .file_name()
@@ -1230,7 +1227,6 @@ impl AppState {
             scroll = (local_line as f32 * LINE_HEIGHT - 40.0).max(0.0);
         }
         let mut win = CodeWindow {
-            id: self.next_window_id,
             file: path.clone(),
             title,
             focus_line: jump_to,

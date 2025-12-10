@@ -14,7 +14,7 @@ mod theme;
 
 use app::AppState;
 use constants::*;
-use theme::{Palette, default_palette, load_tmtheme_palette};
+use theme::{default_palette, load_tmtheme_palette};
 
 pub enum AppFont {
     Owned(Font),

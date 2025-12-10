@@ -23,7 +23,6 @@ pub const MINIMAP_PADDING: f32 = 6.0;
 
 #[derive(Clone, Debug)]
 pub struct CodeWindow {
-    pub id: usize,
     pub file: PathBuf,
     pub title: String,
     pub focus_line: Option<usize>,
@@ -195,6 +194,7 @@ impl CodeWindow {
         }
     }
 
+    #[allow(dead_code)]
     pub fn minimap_rect(&self, metrics: &ContentMetrics) -> Option<Rectangle> {
         self.minimap_rect_at(metrics, Vector2::new(0.0, 0.0))
     }

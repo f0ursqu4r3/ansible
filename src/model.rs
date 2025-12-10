@@ -1,15 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use once_cell::sync::Lazy;
-use proc_macro2::Span;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, Theme};
 use syntect::parsing::SyntaxSet;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 use walkdir::WalkDir;
-
-use syn::visit::Visit;
 
 use crate::theme::Palette;
 use raylib::prelude::Color as RayColor;
@@ -74,37 +71,15 @@ pub struct ParsedComponents {
 }
 
 pub trait LanguagePlugin {
-    fn language_id(&self) -> &'static str;
     fn matches(&self, path: &Path) -> bool;
     fn parse(&self, path: &Path, content: &str) -> anyhow::Result<ParsedComponents>;
 }
 
-pub struct RustPlugin;
-
-impl LanguagePlugin for RustPlugin {
-    fn language_id(&self) -> &'static str {
-        "rust"
-    }
-
-    fn matches(&self, path: &Path) -> bool {
-        path.extension().map(|e| e == "rs").unwrap_or(false)
-    }
-
-    fn parse(&self, path: &Path, content: &str) -> anyhow::Result<ParsedComponents> {
-        parse_rust(path, content)
-    }
-}
-
 pub struct FallbackPlugin {
-    pub id: &'static str,
     pub exts: Option<&'static [&'static str]>,
 }
 
 impl LanguagePlugin for FallbackPlugin {
-    fn language_id(&self) -> &'static str {
-        self.id
-    }
-
     fn matches(&self, path: &Path) -> bool {
         match self.exts {
             Some(exts) => path
@@ -125,7 +100,6 @@ impl LanguagePlugin for FallbackPlugin {
 }
 
 pub struct TreeSitterPlugin {
-    pub id: &'static str,
     pub exts: &'static [&'static str],
     pub language: Language,
     pub def_query: &'static str,
@@ -133,10 +107,6 @@ pub struct TreeSitterPlugin {
 }
 
 impl LanguagePlugin for TreeSitterPlugin {
-    fn language_id(&self) -> &'static str {
-        self.id
-    }
-
     fn matches(&self, path: &Path) -> bool {
         path.extension()
             .and_then(|e| e.to_str())
@@ -160,14 +130,12 @@ impl ProjectModel {
         let root = root.as_ref().to_path_buf();
         let plugins: Vec<Box<dyn LanguagePlugin>> = vec![
             Box::new(TreeSitterPlugin {
-                id: "rust",
                 exts: &["rs"],
                 language: tree_sitter_rust::LANGUAGE.into(),
                 def_query: "(function_item name: (identifier) @name)",
                 call_query: "(call_expression function: (identifier) @call)",
             }),
             Box::new(TreeSitterPlugin {
-                id: "python",
                 exts: &["py"],
                 language: tree_sitter_python::LANGUAGE.into(),
                 def_query: "(function_definition name: (identifier) @name)",
@@ -177,7 +145,6 @@ impl ProjectModel {
                 ",
             }),
             Box::new(TreeSitterPlugin {
-                id: "javascript",
                 exts: &["js", "jsx"],
                 language: tree_sitter_javascript::LANGUAGE.into(),
                 def_query: "
@@ -190,7 +157,6 @@ impl ProjectModel {
                 ",
             }),
             Box::new(TreeSitterPlugin {
-                id: "typescript",
                 exts: &["ts", "tsx"],
                 language: tree_sitter_typescript::LANGUAGE_TSX.into(),
                 def_query: "
@@ -204,23 +170,18 @@ impl ProjectModel {
                 ",
             }),
             Box::new(FallbackPlugin {
-                id: "go",
                 exts: Some(&["go"]),
             }),
             Box::new(FallbackPlugin {
-                id: "c-cpp",
                 exts: Some(&["c", "h", "cpp", "cc", "hpp", "cxx"]),
             }),
             Box::new(FallbackPlugin {
-                id: "kotlin",
                 exts: Some(&["kt", "kts"]),
             }),
             Box::new(FallbackPlugin {
-                id: "java",
                 exts: Some(&["java"]),
             }),
             Box::new(FallbackPlugin {
-                id: "swift",
                 exts: Some(&["swift"]),
             }),
         ];
@@ -422,24 +383,6 @@ pub fn colorized_segments_with_calls(
     segments
 }
 
-fn span_to_line_col(span: Span) -> Option<(usize, usize)> {
-    let start = span.start();
-    Some((start.line.saturating_sub(1), start.column))
-}
-
-fn span_to_len(span: Span, source: &str) -> Option<usize> {
-    let start = span.start();
-    let end = span.end();
-    if start.line != end.line {
-        return None;
-    }
-    let line_idx = start.line.saturating_sub(1);
-    let line = source.lines().nth(line_idx)?;
-    let start_idx = start.column.min(line.len());
-    let end_idx = end.column.min(line.len());
-    Some(end_idx.saturating_sub(start_idx))
-}
-
 fn node_text<'a>(node: Node<'a>, source: &'a str) -> Option<&'a str> {
     let range = node.byte_range();
     source.get(range)
@@ -507,123 +450,6 @@ fn module_for_path(path: &Path) -> String {
         .unwrap_or("module")
         .to_string()
 }
-
-fn parse_rust(path: &Path, content: &str) -> anyhow::Result<ParsedComponents> {
-    let file = syn::parse_file(content)?;
-    let mut collector = SyntaxCollector::new(path, content);
-    collector.visit_file(&file);
-    Ok(ParsedComponents {
-        defs: collector.defs,
-        calls: collector.calls,
-    })
-}
-
-struct SyntaxCollector<'a> {
-    file: &'a Path,
-    source: &'a str,
-    defs: Vec<FunctionDef>,
-    calls: Vec<FunctionCall>,
-    module_stack: Vec<String>,
-    keywords: HashSet<&'static str>,
-}
-
-impl<'a> SyntaxCollector<'a> {
-    fn new(file: &'a Path, source: &'a str) -> Self {
-        let keywords: HashSet<&'static str> = KEYWORDS.into_iter().collect();
-
-        Self {
-            file,
-            source,
-            defs: Vec::new(),
-            calls: Vec::new(),
-            module_stack: Vec::new(),
-            keywords,
-        }
-    }
-
-    fn module_path(&self) -> String {
-        if self.module_stack.is_empty() {
-            "crate".to_string()
-        } else {
-            format!("crate::{}", self.module_stack.join("::"))
-        }
-    }
-
-    fn push_mod(&mut self, name: &str) {
-        self.module_stack.push(name.to_string());
-    }
-
-    fn pop_mod(&mut self) {
-        self.module_stack.pop();
-    }
-
-    fn add_def(&mut self, ident: &syn::Ident, span: Span) {
-        if let Some((line, col)) = span_to_line_col(span) {
-            self.defs.push(FunctionDef {
-                name: ident.to_string(),
-                module_path: self.module_path(),
-                line,
-                col,
-            });
-        }
-    }
-
-    fn add_call(&mut self, name: String, span: Span) {
-        if let Some((line, col)) = span_to_line_col(span) {
-            self.calls.push(FunctionCall {
-                name: name.clone(),
-                module_path: self.module_path(),
-                line,
-                col,
-                len: span_to_len(span, self.source).unwrap_or(name.len()),
-            });
-        }
-    }
-}
-
-impl<'ast> Visit<'ast> for SyntaxCollector<'_> {
-    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        self.add_def(&node.sig.ident, node.sig.ident.span());
-        syn::visit::visit_item_fn(self, node);
-    }
-
-    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        self.add_def(&node.sig.ident, node.sig.ident.span());
-        syn::visit::visit_impl_item_fn(self, node);
-    }
-
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        self.push_mod(&node.ident.to_string());
-        syn::visit::visit_item_mod(self, node);
-        self.pop_mod();
-    }
-
-    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
-        if let syn::Expr::Path(ref path) = *node.func {
-            if let Some(segment) = path.path.segments.last() {
-                let name = segment.ident.to_string();
-                if !self.keywords.contains(name.as_str()) {
-                    self.add_call(name, segment.ident.span());
-                }
-            }
-        }
-        syn::visit::visit_expr_call(self, node);
-    }
-
-    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        let name = node.method.to_string();
-        if !self.keywords.contains(name.as_str()) {
-            self.add_call(name, node.method.span());
-        }
-        syn::visit::visit_expr_method_call(self, node);
-    }
-}
-
-pub const KEYWORDS: [&str; 21] = [
-    "if", "else", "for", "while", "loop", "match", "fn", "pub", "impl", "struct", "enum", "use",
-    "let", "in", "where", "return", "async", "mod", "trait", "const", "static",
-];
-
 pub fn find_function_span(pf: &ParsedFile, line: usize) -> Option<(usize, usize)> {
     let start = pf.defs.iter().find(|d| d.line == line).map(|d| d.line)?;
     let mut end = pf.lines.len().saturating_sub(1);
