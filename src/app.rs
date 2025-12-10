@@ -175,6 +175,8 @@ impl AppState {
                     title,
                     focus_line: None,
                     view_kind,
+                    def_refs: Vec::new(),
+                    call_refs: Vec::new(),
                     link_from: saved.link_from.and_then(|orig| {
                         Some(CallOrigin {
                             file: self.project.root.join(orig.file),
@@ -198,6 +200,7 @@ impl AppState {
                     drag_start: Vector2 { x: 0.0, y: 0.0 },
                 };
                 code_window::clamp_window_scroll(&self.project, &mut win);
+                self.refresh_window_metadata(&mut win);
                 self.windows.push(win);
                 self.next_window_id += 1;
             }
@@ -255,6 +258,7 @@ impl AppState {
                 win.focus_line = Some(line);
             }
             code_window::clamp_window_scroll(&self.project, &mut win);
+            self.refresh_window_metadata(&mut win);
             self.windows.push(win);
             return;
         }
@@ -277,6 +281,8 @@ impl AppState {
                 .to_string(),
             focus_line: jump_to,
             view_kind: CodeViewKind::FullFile,
+            def_refs: Vec::new(),
+            call_refs: Vec::new(),
             link_from: None,
             position: pos,
             size: Vector2::new(720.0, 460.0),
@@ -295,6 +301,7 @@ impl AppState {
             drag_start: Vector2 { x: 0.0, y: 0.0 },
         };
         code_window::clamp_window_scroll(&self.project, &mut win);
+        self.refresh_window_metadata(&mut win);
         self.next_window_id += 1;
         self.windows.push(win);
     }
@@ -901,14 +908,21 @@ impl AppState {
         );
     }
 
+    fn refresh_window_metadata(&self, win: &mut CodeWindow) {
+        if let Some(pf) = self.project.parsed.get(&win.file) {
+            win.update_refs(pf);
+        } else {
+            win.def_refs.clear();
+            win.call_refs.clear();
+        }
+    }
+
     fn draw_call_links(&self, d: &mut RaylibMode2D<RaylibDrawHandle>) {
         let mut fn_windows = Vec::new();
         for (idx, win) in self.windows.iter().enumerate() {
             if let CodeViewKind::SingleFn { start, .. } = win.view_kind {
-                if let Some(pf) = self.project.parsed.get(&win.file) {
-                    if let Some(def) = pf.defs.iter().find(|d| d.line == start) {
-                        fn_windows.push((idx, def.name.clone(), def.module_path.clone(), start));
-                    }
+                if let Some(def) = win.def_refs.iter().find(|d| d.line >= start) {
+                    fn_windows.push((idx, def.name.clone(), def.module_path.clone(), def.line));
                 }
             }
         }
@@ -921,17 +935,12 @@ impl AppState {
             let mut callers: Vec<(usize, usize)> = Vec::new();
             if let Some(origin) = &fn_win.link_from {
                 if let Some(idx) = self.windows.iter().position(|w| w.file == origin.file) {
-                    if let Some(pf) = self.project.parsed.get(&origin.file) {
-                        let calls: Vec<&crate::model::FunctionCall> = pf
-                            .calls_on_line(origin.line)
-                            .filter(|c| c.name == fn_name)
-                            .collect();
-                        if !calls.is_empty() {
-                            if calls.iter().any(|c| c.module_path == fn_module) {
-                                callers.push((idx, origin.line));
-                            } else {
-                                callers.push((idx, origin.line));
-                            }
+                    if let Some(caller) = self.windows.get(idx) {
+                        let valid = caller.call_refs.iter().any(|c| {
+                            c.line == origin.line && c.name == fn_name && c.module_path == fn_module
+                        });
+                        if valid {
+                            callers.push((idx, origin.line));
                         }
                     }
                 }
@@ -941,20 +950,13 @@ impl AppState {
                 if idx == fn_idx {
                     continue;
                 }
-                let caller_pf = match self.project.parsed.get(&caller_win.file) {
-                    Some(pf) => pf,
-                    None => continue,
-                };
-                let mut matches: Vec<&crate::model::FunctionCall> = caller_pf
-                    .calls
+                let matches: Vec<&code_window::CallRef> = caller_win
+                    .call_refs
                     .iter()
-                    .filter(|c| c.name == fn_name)
+                    .filter(|c| c.name == fn_name && c.module_path == fn_module)
                     .collect();
                 if matches.is_empty() {
                     continue;
-                }
-                if matches.iter().any(|c| c.module_path == fn_module) {
-                    matches.retain(|c| c.module_path == fn_module);
                 }
                 for call in matches {
                     callers.push((idx, call.line));
@@ -1210,6 +1212,7 @@ impl AppState {
                 win.focus_line = Some(line);
             }
             code_window::clamp_window_scroll(&self.project, &mut win);
+            self.refresh_window_metadata(&mut win);
             self.windows.push(win);
             return;
         }
@@ -1232,6 +1235,8 @@ impl AppState {
             title,
             focus_line: jump_to,
             view_kind,
+            def_refs: Vec::new(),
+            call_refs: Vec::new(),
             link_from: origin,
             position: pos,
             size: Vector2::new(720.0, 460.0),
@@ -1250,6 +1255,7 @@ impl AppState {
             drag_start: Vector2 { x: 0.0, y: 0.0 },
         };
         code_window::clamp_window_scroll(&self.project, &mut win);
+        self.refresh_window_metadata(&mut win);
         self.next_window_id += 1;
         self.windows.push(win);
     }

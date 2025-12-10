@@ -11,55 +11,9 @@
         720.0,
         1016.85156
       ],
-      "scroll": 4251.346,
+      "scroll": 1893.9774,
       "scroll_x": 0.0,
       "link_from": null
-    },
-    {
-      "file": "src/app.rs",
-      "view_kind": {
-        "type": "SingleFn",
-        "start": 91,
-        "end": 102,
-        "title": "app.rs - single_fn_title"
-      },
-      "position": [
-        1134.5547,
-        438.4414
-      ],
-      "size": [
-        720.0,
-        460.0
-      ],
-      "scroll": 0.0,
-      "scroll_x": 0.0,
-      "link_from": {
-        "file": "src/app.rs",
-        "line": 166
-      }
-    },
-    {
-      "file": "src/app.rs",
-      "view_kind": {
-        "type": "SingleFn",
-        "start": 133,
-        "end": 136,
-        "title": "app.rs - layout_path"
-      },
-      "position": [
-        1316.4375,
-        101.38281
-      ],
-      "size": [
-        530.09375,
-        220.0
-      ],
-      "scroll": 0.0,
-      "scroll_x": 0.0,
-      "link_from": {
-        "file": "src/app.rs",
-        "line": 138
-      }
     }
   ],
   "sidebar_scroll": 0.0,

@@ -28,6 +28,8 @@ pub struct CodeWindow {
     pub title: String,
     pub focus_line: Option<usize>,
     pub view_kind: CodeViewKind,
+    pub def_refs: Vec<FunctionRef>,
+    pub call_refs: Vec<CallRef>,
     pub link_from: Option<CallOrigin>,
     pub position: Vector2,
     pub size: Vector2,
@@ -50,6 +52,20 @@ pub struct CodeWindow {
 pub enum CodeViewKind {
     FullFile,
     SingleFn { start: usize, end: usize },
+}
+
+#[derive(Clone, Debug)]
+pub struct FunctionRef {
+    pub name: String,
+    pub module_path: String,
+    pub line: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct CallRef {
+    pub name: String,
+    pub module_path: String,
+    pub line: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -289,6 +305,30 @@ impl CodeWindow {
         (start, &pf.lines[start..=end])
     }
 
+    pub fn update_refs(&mut self, pf: &ParsedFile) {
+        let (start, end) = self.view_range(pf);
+        self.def_refs = pf
+            .defs
+            .iter()
+            .filter(|d| d.line >= start && d.line <= end)
+            .map(|d| FunctionRef {
+                name: d.name.clone(),
+                module_path: d.module_path.clone(),
+                line: d.line,
+            })
+            .collect();
+        self.call_refs = pf
+            .calls
+            .iter()
+            .filter(|c| c.line >= start && c.line <= end)
+            .map(|c| CallRef {
+                name: c.name.clone(),
+                module_path: c.module_path.clone(),
+                line: c.line,
+            })
+            .collect();
+    }
+
     pub fn hit_test(&self, mouse: Vector2) -> bool {
         let margin = RESIZE_HANDLE * 0.6;
         let rect = Rectangle {
@@ -508,9 +548,11 @@ pub fn draw_code(
             mini.height as i32,
             palette.window,
         );
-        let scale = mini.height / metrics.total_height.max(1.0);
-        let line_scale = (scale * LINE_HEIGHT).max(1.0);
-        let block_height = (line_scale * 0.7).clamp(1.0, line_scale);
+        let raw_scale = mini.height / metrics.total_height.max(1.0);
+        let line_step = (raw_scale * LINE_HEIGHT).clamp(1.0, 2.0);
+        let scale = line_step / LINE_HEIGHT;
+        let block_height = line_step;
+        let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
         let max_width = (mini.width - 4.0).max(1.0);
         let mini_scissor = world_to_screen_rect(mini, pan, zoom);
         let mut scoped = d.begin_scissor_mode(
@@ -519,12 +561,26 @@ pub fn draw_code(
             mini_scissor.width as i32,
             mini_scissor.height as i32,
         );
-        for (idx, _line) in view_lines.iter().enumerate() {
-            let line_y = mini.y + idx as f32 * line_scale;
+        let content_height = view_lines.len() as f32 * line_step;
+        let scroll_range = metrics.max_scroll_y().max(1.0);
+        let scroll_ratio = (win.scroll / scroll_range).clamp(0.0, 1.0);
+        let origin_y = if content_height > mini.height {
+            let travel = content_height - mini.height;
+            mini.y - scroll_ratio * travel
+        } else {
+            mini.y
+        };
+        let start_idx = ((mini.y - origin_y) / line_step).floor().max(0.0) as usize;
+        for (idx, _line) in view_lines.iter().enumerate().skip(start_idx) {
+            let line_y = origin_y + idx as f32 * line_step;
             if line_y > mini.y + mini.height {
                 break;
             }
             let line_idx = view_start + idx;
+            let line = &file.lines[line_idx];
+            if line.trim().is_empty() {
+                continue;
+            }
             let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
             let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
             let mut x = mini.x + 2.0;
@@ -551,8 +607,9 @@ pub fn draw_code(
         }
         drop(scoped);
 
-        let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
-        let view_y = mini.y + win.scroll * scale;
+        let scroll_range = metrics.max_scroll_y().max(1.0);
+        let ratio = (win.scroll / scroll_range).clamp(0.0, 1.0);
+        let view_y = mini.y + ratio * (mini.height - view_h);
         d.draw_rectangle(
             mini.x as i32,
             view_y as i32,
