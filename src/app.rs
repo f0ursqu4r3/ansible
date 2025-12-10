@@ -327,7 +327,7 @@ impl AppState {
         screen_h: f32,
     ) {
         let mut world_mouse = Vector2::new(
-            mouse.x / self.zoom - self.pan.x,
+            (mouse.x - SIDEBAR_WIDTH) / self.zoom - self.pan.x,
             mouse.y / self.zoom - self.pan.y,
         );
         self.last_mouse_world = Some(world_mouse);
@@ -339,11 +339,11 @@ impl AppState {
                 let world_anchor = world_mouse;
                 self.zoom = new_zoom;
                 self.pan = Vector2::new(
-                    mouse.x / self.zoom - world_anchor.x,
+                    (mouse.x - SIDEBAR_WIDTH) / self.zoom - world_anchor.x,
                     mouse.y / self.zoom - world_anchor.y,
                 );
                 world_mouse = Vector2::new(
-                    mouse.x / self.zoom - self.pan.x,
+                    (mouse.x - SIDEBAR_WIDTH) / self.zoom - self.pan.x,
                     mouse.y / self.zoom - self.pan.y,
                 );
                 self.last_mouse_world = Some(world_mouse);
