@@ -10,6 +10,7 @@ use crate::constants::{
     BREADCRUMB_HEIGHT, CODE_X_OFFSET, LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_WIDTH, TITLE_BAR_HEIGHT,
 };
 use crate::helpers::matches_view;
+use std::time::{Duration, Instant};
 use crate::icons::Icons;
 use crate::model::{DefinitionLocation, ProjectModel, find_function_span};
 use crate::sidebar::{SidebarAction, SidebarState};
@@ -80,6 +81,9 @@ pub struct AppState {
     zoom: f32,
     minimap_dragging: bool,
     last_mouse_world: Option<Vector2>,
+    last_click_time: Option<Instant>,
+    last_click_pos: Option<Vector2>,
+    last_click_window: Option<usize>,
 }
 
 struct MinimapContext {
@@ -122,6 +126,9 @@ impl AppState {
             zoom: 1.0,
             minimap_dragging: false,
             last_mouse_world: None,
+            last_click_time: None,
+            last_click_pos: None,
+            last_click_window: None,
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -326,26 +333,69 @@ impl AppState {
         screen_w: f32,
         screen_h: f32,
     ) {
-        let mut world_mouse = Vector2::new(
-            (mouse.x) / self.zoom - self.pan.x,
-            mouse.y / self.zoom - self.pan.y,
-        );
+        let mut world_mouse = Vector2::new(mouse.x / self.zoom - self.pan.x, mouse.y / self.zoom - self.pan.y);
         self.last_mouse_world = Some(world_mouse);
+
+        let mut double_open: Option<(PathBuf, usize, Option<CallOrigin>)> = None;
+        if left_pressed {
+            let now = Instant::now();
+            let hit_idx = self
+                .windows
+                .iter()
+                .rposition(|w| w.hit_test(world_mouse));
+            if let Some(idx) = hit_idx {
+                let same_win = self.last_click_window == Some(idx);
+                let close_pos = self
+                    .last_click_pos
+                    .map(|p| {
+                        let dx = p.x - world_mouse.x;
+                        let dy = p.y - world_mouse.y;
+                        dx * dx + dy * dy < 16.0
+                    })
+                    .unwrap_or(false);
+                let close_time = self
+                    .last_click_time
+                    .map(|t| now.duration_since(t) <= Duration::from_millis(350))
+                    .unwrap_or(false);
+                if same_win && close_pos && close_time {
+                    if let CodeViewKind::SingleFn { start, .. } = self.windows[idx].view_kind {
+                        let file = self.windows[idx].file.clone();
+                        let origin = self.windows[idx].link_from.clone();
+                        double_open = Some((file, start, origin));
+                    }
+                }
+            }
+            self.last_click_time = Some(now);
+            self.last_click_pos = Some(world_mouse);
+            self.last_click_window = hit_idx;
+        }
+
+        if let Some((file, line, origin)) = double_open {
+            let title = file
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file")
+                .to_string();
+            self.open_file_with_view(file, Some(line), title, CodeViewKind::FullFile, origin);
+            return;
+        }
 
         if ctrl_down && wheel.abs() > f32::EPSILON {
             let factor = 1.0 + wheel * 0.1;
             let new_zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
             if (new_zoom - self.zoom).abs() > f32::EPSILON {
-                let world_anchor = world_mouse;
-                self.zoom = new_zoom;
-                self.pan = Vector2::new(
-                    (mouse.x) / self.zoom - world_anchor.x,
-                    mouse.y / self.zoom - world_anchor.y,
-                );
-                world_mouse = Vector2::new(
-                    (mouse.x) / self.zoom - self.pan.x,
+                // Keep the point under the cursor fixed while zooming; consider the sidebar offset.
+                let world_anchor = Vector2::new(
+                    (mouse.x - SIDEBAR_WIDTH) / self.zoom - self.pan.x,
                     mouse.y / self.zoom - self.pan.y,
                 );
+                self.zoom = new_zoom;
+                self.pan = Vector2::new(
+                    (mouse.x - SIDEBAR_WIDTH) / self.zoom - world_anchor.x,
+                    mouse.y / self.zoom - world_anchor.y,
+                );
+                world_mouse =
+                    Vector2::new(mouse.x / self.zoom - self.pan.x, mouse.y / self.zoom - self.pan.y);
                 self.last_mouse_world = Some(world_mouse);
             }
             return;

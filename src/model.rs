@@ -17,6 +17,7 @@ pub struct FunctionDef {
     pub module_path: String,
     pub line: usize,
     pub col: usize,
+    pub kind: String,
 }
 
 #[derive(Clone, Debug)]
@@ -312,6 +313,30 @@ fn syntect_color_to_ray(c: syntect::highlighting::Color) -> RayColor {
     RayColor::new(c.r, c.g, c.b, c.a)
 }
 
+fn def_kind(node: Node) -> String {
+    let mut n = node;
+    for _ in 0..4 {
+        let k = n.kind().to_string();
+        if matches!(
+            k.as_str(),
+            "function_item"
+                | "struct_item"
+                | "enum_item"
+                | "trait_item"
+                | "type_item"
+                | "impl_item"
+        ) {
+            return k;
+        }
+        if let Some(p) = n.parent() {
+            n = p;
+        } else {
+            break;
+        }
+    }
+    n.kind().to_string()
+}
+
 fn load_theme() -> Option<Theme> {
     let path = std::env::var("TM_THEME")
         .ok()
@@ -451,12 +476,14 @@ fn parse_tree_sitter(
                 Some(t) => t,
                 None => continue,
             };
+            let kind = def_kind(cap.node);
             let pos = cap.node.start_position();
             defs.push(FunctionDef {
                 name: text.to_string(),
                 module_path: module_for_path(path),
                 line: pos.row,
                 col: pos.column,
+                kind,
             });
         }
     }
@@ -501,15 +528,39 @@ pub fn find_function_span(pf: &ParsedFile, line: usize) -> Option<(usize, usize)
         .iter()
         .position(|d| d.line == line)
         .or_else(|| defs.iter().rposition(|d| d.line <= line))?;
-    let target_name = &defs[idx].name;
+    let target = defs[idx];
 
-    let first_idx = defs.iter().position(|d| d.name == *target_name)?;
-    let last_idx = defs.iter().rposition(|d| d.name == *target_name)?;
+    let type_kinds = ["struct_item", "enum_item", "trait_item", "type_item", "impl_item"];
+    let is_type = type_kinds.contains(&target.kind.as_str());
 
-    let start = defs[first_idx].line;
+    if is_type {
+        let start_idx = defs
+            .iter()
+            .position(|d| d.name == target.name && type_kinds.contains(&d.kind.as_str()))
+            .unwrap_or(idx);
+        let start = defs[start_idx].line;
+
+        let end = defs
+            .iter()
+            .skip(idx + 1)
+            .find(|d| {
+                if d.name == target.name {
+                    return false;
+                }
+                if type_kinds.contains(&d.kind.as_str()) {
+                    return true;
+                }
+                d.kind != "impl_item"
+            })
+            .map(|d| d.line.saturating_sub(1))
+            .unwrap_or_else(|| pf.lines.len().saturating_sub(1));
+        return Some((start, end.min(pf.lines.len().saturating_sub(1))));
+    }
+
+    let start = target.line;
     let end = defs
         .iter()
-        .skip(last_idx + 1)
+        .skip(idx + 1)
         .find(|d| d.line > start)
         .map(|d| d.line.saturating_sub(1))
         .unwrap_or_else(|| pf.lines.len().saturating_sub(1));
