@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use tree_sitter::{Language, Node, Parser, Point, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{
+    Language, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
+};
 use walkdir::WalkDir;
 
 use crate::theme::Palette;
@@ -61,6 +63,13 @@ pub enum HighlightKind {
     Comment,
     String,
     Keyword,
+    Function,
+    Type,
+    Constant,
+    Number,
+    Property,
+    Operator,
+    Builtin,
 }
 
 pub struct ProjectModel {
@@ -77,15 +86,12 @@ pub struct ParsedComponents {
 
 pub trait LanguagePlugin {
     fn matches(&self, path: &Path) -> bool;
-    fn parse(&self, path: &Path, content: &str) -> anyhow::Result<ParsedComponents>;
-    fn highlight(
+    fn parse_and_highlight(
         &self,
-        _path: &Path,
-        _content: &str,
+        path: &Path,
+        content: &str,
         lines: &[String],
-    ) -> anyhow::Result<Vec<Vec<HighlightSpan>>> {
-        Ok(default_highlights(lines))
-    }
+    ) -> anyhow::Result<(ParsedComponents, Vec<Vec<HighlightSpan>>)>;
 }
 
 pub struct FallbackPlugin {
@@ -104,11 +110,19 @@ impl LanguagePlugin for FallbackPlugin {
         }
     }
 
-    fn parse(&self, _path: &Path, _content: &str) -> anyhow::Result<ParsedComponents> {
-        Ok(ParsedComponents {
-            defs: Vec::new(),
-            calls: Vec::new(),
-        })
+    fn parse_and_highlight(
+        &self,
+        _path: &Path,
+        _content: &str,
+        lines: &[String],
+    ) -> anyhow::Result<(ParsedComponents, Vec<Vec<HighlightSpan>>)> {
+        Ok((
+            ParsedComponents {
+                defs: Vec::new(),
+                calls: Vec::new(),
+            },
+            default_highlights(lines),
+        ))
     }
 }
 
@@ -121,6 +135,18 @@ pub struct TreeSitterPlugin {
     pub jsx_highlight_query: Option<&'static str>,
 }
 
+impl TreeSitterPlugin {
+    fn highlight_query_for(&self, path: &Path) -> Option<&'static str> {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        if ext.ends_with('x') {
+            if let Some(q) = self.jsx_highlight_query {
+                return Some(q);
+            }
+        }
+        self.highlight_query
+    }
+}
+
 impl LanguagePlugin for TreeSitterPlugin {
     fn matches(&self, path: &Path) -> bool {
         path.extension()
@@ -129,27 +155,27 @@ impl LanguagePlugin for TreeSitterPlugin {
             .unwrap_or(false)
     }
 
-    fn parse(&self, path: &Path, content: &str) -> anyhow::Result<ParsedComponents> {
-        parse_tree_sitter(
+    fn parse_and_highlight(
+        &self,
+        path: &Path,
+        content: &str,
+        lines: &[String],
+    ) -> anyhow::Result<(ParsedComponents, Vec<Vec<HighlightSpan>>)> {
+        let (parts, tree) = parse_tree_sitter(
             path,
             content,
             &self.language,
             self.def_query,
             self.call_query,
-        )
-    }
-
-    fn highlight(
-        &self,
-        path: &Path,
-        content: &str,
-        lines: &[String],
-    ) -> anyhow::Result<Vec<Vec<HighlightSpan>>> {
+        )?;
         let Some(query_src) = self.highlight_query_for(path) else {
-            return Ok(default_highlights(lines));
+            return Ok((parts, default_highlights(lines)));
         };
-        highlight_tree_sitter(&self.language, query_src, content, lines)
-            .or_else(|_| Ok(default_highlights(lines)))
+        let spans =
+            highlight_tree_sitter(&self.language, &tree, query_src, content, lines).unwrap_or_else(
+                |_| default_highlights(lines),
+            );
+        Ok((parts, spans))
     }
 }
 
@@ -293,8 +319,7 @@ impl ProjectModel {
                 None => continue,
             };
             let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-            let spans = plugin.highlight(file, &content, &lines)?;
-            let parts = plugin.parse(file, &content)?;
+            let (parts, spans) = plugin.parse_and_highlight(file, &content, &lines)?;
             let pf = ParsedFile {
                 path: file.clone(),
                 lines,
@@ -328,18 +353,6 @@ impl ProjectModel {
             .unwrap_or(path)
             .to_string_lossy()
             .to_string()
-    }
-}
-
-impl TreeSitterPlugin {
-    fn highlight_query_for(&self, path: &Path) -> Option<&'static str> {
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
-        if ext.ends_with("x") {
-            if let Some(q) = self.jsx_highlight_query {
-                return Some(q);
-            }
-        }
-        self.highlight_query
     }
 }
 
@@ -392,15 +405,11 @@ struct HighlightCapture {
 
 fn highlight_tree_sitter(
     language: &Language,
+    tree: &Tree,
     query_src: &str,
     content: &str,
     lines: &[String],
 ) -> anyhow::Result<Vec<Vec<HighlightSpan>>> {
-    let mut parser = Parser::new();
-    parser.set_language(language)?;
-    let tree = parser
-        .parse(content, None)
-        .ok_or_else(|| anyhow::anyhow!("parse failed"))?;
     let root = tree.root_node();
     let query = Query::new(language, query_src)?;
     let mut cursor = QueryCursor::new();
@@ -550,17 +559,22 @@ fn highlight_kind_for_capture(name: &str) -> Option<HighlightKind> {
         Some(HighlightKind::Comment)
     } else if name.starts_with("string") {
         Some(HighlightKind::String)
-    } else if name.starts_with("keyword")
-        || name.starts_with("type")
-        || name.starts_with("constructor")
-        || name.starts_with("constant")
-        || name.starts_with("number")
-        || name.starts_with("operator")
-        || name.starts_with("attribute")
-        || name.contains("macro")
-        || name.contains("builtin")
-    {
+    } else if name.starts_with("keyword") || name.starts_with("storage") || name.contains("macro") {
         Some(HighlightKind::Keyword)
+    } else if name.starts_with("function") || name.contains("function") || name.contains("method") {
+        Some(HighlightKind::Function)
+    } else if name.starts_with("type") || name.contains("type") || name.contains("constructor") {
+        Some(HighlightKind::Type)
+    } else if name.starts_with("number") || name.contains("constant.numeric") {
+        Some(HighlightKind::Number)
+    } else if name.starts_with("constant") || name.contains("constant") {
+        Some(HighlightKind::Constant)
+    } else if name.contains("property") || name.contains("field") || name.contains("attribute") {
+        Some(HighlightKind::Property)
+    } else if name.contains("operator") || name.starts_with("punctuation") {
+        Some(HighlightKind::Operator)
+    } else if name.contains("builtin") || name.contains("variable.builtin") {
+        Some(HighlightKind::Builtin)
     } else {
         None
     }
@@ -572,6 +586,13 @@ fn color_for_kind(kind: HighlightKind, palette: &Palette) -> RayColor {
         HighlightKind::Comment => palette.comment,
         HighlightKind::String => palette.string,
         HighlightKind::Keyword => palette.keyword,
+        HighlightKind::Function => palette.call,
+        HighlightKind::Type => palette.r#type,
+        HighlightKind::Constant => palette.constant,
+        HighlightKind::Number => palette.number,
+        HighlightKind::Property => palette.property,
+        HighlightKind::Operator => palette.operator,
+        HighlightKind::Builtin => palette.builtin,
     }
 }
 
@@ -653,7 +674,7 @@ fn parse_tree_sitter(
     language: &Language,
     def_query_src: &str,
     call_query_src: &str,
-) -> anyhow::Result<ParsedComponents> {
+) -> anyhow::Result<(ParsedComponents, Tree)> {
     let mut parser = Parser::new();
     parser.set_language(language)?;
     let tree = parser
@@ -704,7 +725,7 @@ fn parse_tree_sitter(
     }
     defs.sort_by_key(|d| d.line);
     calls.sort_by_key(|c| c.line);
-    Ok(ParsedComponents { defs, calls })
+    Ok((ParsedComponents { defs, calls }, tree))
 }
 
 fn module_for_path(path: &Path) -> String {

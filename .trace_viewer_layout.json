@@ -9,8 +9,8 @@
         "title": "minimap_rect_at"
       },
       "position": [
-        1241.2656,
-        52.85547
+        1025.6953,
+        -195.63672
       ],
       "size": [
         720.0,
@@ -25,16 +25,39 @@
     },
     {
       "file": "src/app.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 959,
+        "end": 1039,
+        "title": "draw"
+      },
+      "position": [
+        1064.6523,
+        485.38672
+      ],
+      "size": [
+        720.0,
+        460.0
+      ],
+      "scroll": 0.0,
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src/app.rs",
+        "line": 1030
+      }
+    },
+    {
+      "file": "src/app.rs",
       "view_kind": null,
       "position": [
         154.57031,
         -139.3086
       ],
       "size": [
-        890.3906,
-        791.40234
+        674.125,
+        1065.6328
       ],
-      "scroll": 22980.8,
+      "scroll": 19736.0,
       "scroll_x": 0.0,
       "link_from": null
     }

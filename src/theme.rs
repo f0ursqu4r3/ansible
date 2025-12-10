@@ -16,6 +16,12 @@ pub struct Palette {
     pub comment: Color,
     pub string: Color,
     pub keyword: Color,
+    pub r#type: Color,
+    pub constant: Color,
+    pub number: Color,
+    pub property: Color,
+    pub operator: Color,
+    pub builtin: Color,
     pub call: Color,
     pub line_num: Color,
     pub close: Color,
@@ -37,6 +43,12 @@ pub fn default_palette() -> Palette {
         comment: Color::new(120, 130, 150, 255),
         string: Color::new(180, 200, 140, 255),
         keyword: Color::new(255, 170, 120, 255),
+        r#type: Color::new(200, 220, 255, 255),
+        constant: Color::new(210, 190, 255, 255),
+        number: Color::new(180, 210, 255, 255),
+        property: Color::new(190, 210, 230, 255),
+        operator: Color::new(255, 200, 150, 255),
+        builtin: Color::new(200, 200, 255, 255),
         call: Color::new(120, 200, 255, 255),
         line_num: Color::new(90, 100, 130, 255),
         close: Color::new(230, 120, 120, 255),
@@ -99,11 +111,40 @@ pub fn load_tmtheme_palette() -> Option<Palette> {
             if scope.contains("string") {
                 palette.string = color;
             }
-            if scope.contains("keyword") {
+            if scope.contains("keyword") || scope.contains("storage") {
                 palette.keyword = color;
             }
             if scope.contains("entity.name.function") || scope.contains("support.function") {
                 palette.call = color;
+            }
+            if scope.contains("entity.name.type")
+                || scope.contains("support.type")
+                || scope.contains("storage.type")
+            {
+                palette.r#type = color;
+            }
+            if scope.contains("constant.numeric") {
+                palette.number = color;
+            } else if scope.contains("constant")
+                || scope.contains("support.constant")
+                || scope.contains("variable.language")
+            {
+                palette.constant = color;
+            }
+            if scope.contains("variable.other.property")
+                || scope.contains("variable.property")
+                || scope.contains("meta.attribute")
+            {
+                palette.property = color;
+            }
+            if scope.contains("operator") {
+                palette.operator = color;
+            }
+            if scope.contains("punctuation") {
+                palette.operator = color;
+            }
+            if scope.contains("builtin") || scope.contains("support.variable") {
+                palette.builtin = color;
             }
         }
     }
