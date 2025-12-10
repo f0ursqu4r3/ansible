@@ -139,6 +139,8 @@ impl ProjectModel {
                   (union_item name: (type_identifier) @name)
                   (type_item name: (type_identifier) @name)
                   (trait_item name: (type_identifier) @name)
+                  (impl_item type: (type_identifier) @name)
+                  (impl_item type: (scoped_type_identifier) @name)
                 ",
                 call_query: "
                   (call_expression function: (identifier) @call)
@@ -499,10 +501,15 @@ pub fn find_function_span(pf: &ParsedFile, line: usize) -> Option<(usize, usize)
         .iter()
         .position(|d| d.line == line)
         .or_else(|| defs.iter().rposition(|d| d.line <= line))?;
-    let start = defs[idx].line;
+    let target_name = &defs[idx].name;
+
+    let first_idx = defs.iter().position(|d| d.name == *target_name)?;
+    let last_idx = defs.iter().rposition(|d| d.name == *target_name)?;
+
+    let start = defs[first_idx].line;
     let end = defs
         .iter()
-        .skip(idx + 1)
+        .skip(last_idx + 1)
         .find(|d| d.line > start)
         .map(|d| d.line.saturating_sub(1))
         .unwrap_or_else(|| pf.lines.len().saturating_sub(1));
