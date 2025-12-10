@@ -1,6 +1,6 @@
 # Agent Notes
 - Entry point: `src/main.rs`. UI built with `raylib` (WeakFont for measurements).
-- Parsing: `ProjectModel` uses a Tree-sitter plugin pipeline (Rust, Python, JS, TS/TSX; fallbacks for others) to build `ParsedFile` (lines, defs, calls) and a `defs` index keyed by name. Syntax highlighting uses `syntect`. Module hints come from file stems; no full resolution.
+- Parsing: `ProjectModel` uses a Tree-sitter plugin pipeline (Rust, Python, JS, TS/TSX; fallbacks for others) to build `ParsedFile` (lines, defs, calls) and a `defs` index keyed by name. Syntax highlighting uses Tree-sitter highlight queries (keywords/strings/comments + call highlights). Module hints come from file stems; no full resolution.
 - Data flow: `AppState` owns windows, search state, and persists layouts to `.trace_viewer_layout.json` in the project root. `find_function_span` groups Rust types with their `impl` blocks.
 - UI: Sidebar lists files (filtered by search) and matching defs. Code windows are draggable, have a breadcrumb bar (path + module hint), syntax highlighting (keywords/strings/comments + call highlights), and clickable call/type names that open definitions. Scroll is per-window; zoom is camera-based.
 - Input: Mouse wheel scrolls; Shift + wheel scrolls horizontally. Ctrl + wheel zooms around cursor; middle drag or Space + drag pans. Sidebar search requires click to focus; typing is only consumed when focused. Backspace handled per-frame. Double-clicking a SingleFn/Single type window opens the full file at that definition.

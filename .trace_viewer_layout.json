@@ -1,39 +1,16 @@
 {
   "windows": [
     {
-      "file": "src/app.rs",
-      "view_kind": {
-        "type": "SingleFn",
-        "start": 259,
-        "end": 313,
-        "title": "open_file"
-      },
-      "position": [
-        1461.7305,
-        68.515625
-      ],
-      "size": [
-        720.0,
-        962.4219
-      ],
-      "scroll": 0.0,
-      "scroll_x": 0.0,
-      "link_from": {
-        "file": "src/app.rs",
-        "line": 667
-      }
-    },
-    {
       "file": "src/code_window.rs",
       "view_kind": {
         "type": "SingleFn",
-        "start": 152,
-        "end": 158,
-        "title": "clamp_window_scroll"
+        "start": 201,
+        "end": 224,
+        "title": "minimap_rect_at"
       },
       "position": [
-        2328.5583,
-        531.7672
+        1241.2656,
+        52.85547
       ],
       "size": [
         720.0,
@@ -43,21 +20,21 @@
       "scroll_x": 0.0,
       "link_from": {
         "file": "src/app.rs",
-        "line": 278
+        "line": 1199
       }
     },
     {
       "file": "src/app.rs",
       "view_kind": null,
       "position": [
-        284.0,
-        40.0
+        154.57031,
+        -139.3086
       ],
       "size": [
-        1026.9219,
-        1243.8789
+        890.3906,
+        791.40234
       ],
-      "scroll": 13688.001,
+      "scroll": 22980.8,
       "scroll_x": 0.0,
       "link_from": null
     }

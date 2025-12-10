@@ -1,11 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use once_cell::sync::Lazy;
-use syntect::easy::HighlightLines;
-use syntect::highlighting::{Style, Theme};
-use syntect::parsing::SyntaxSet;
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Language, Node, Parser, Point, Query, QueryCursor, StreamingIterator};
 use walkdir::WalkDir;
 
 use crate::theme::Palette;
@@ -56,7 +52,15 @@ pub struct DefinitionLocation {
 pub struct HighlightSpan {
     pub start: usize,
     pub end: usize,
-    pub color: RayColor,
+    pub kind: HighlightKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HighlightKind {
+    Plain,
+    Comment,
+    String,
+    Keyword,
 }
 
 pub struct ProjectModel {
@@ -74,6 +78,14 @@ pub struct ParsedComponents {
 pub trait LanguagePlugin {
     fn matches(&self, path: &Path) -> bool;
     fn parse(&self, path: &Path, content: &str) -> anyhow::Result<ParsedComponents>;
+    fn highlight(
+        &self,
+        _path: &Path,
+        _content: &str,
+        lines: &[String],
+    ) -> anyhow::Result<Vec<Vec<HighlightSpan>>> {
+        Ok(default_highlights(lines))
+    }
 }
 
 pub struct FallbackPlugin {
@@ -105,6 +117,8 @@ pub struct TreeSitterPlugin {
     pub language: Language,
     pub def_query: &'static str,
     pub call_query: &'static str,
+    pub highlight_query: Option<&'static str>,
+    pub jsx_highlight_query: Option<&'static str>,
 }
 
 impl LanguagePlugin for TreeSitterPlugin {
@@ -123,6 +137,19 @@ impl LanguagePlugin for TreeSitterPlugin {
             self.def_query,
             self.call_query,
         )
+    }
+
+    fn highlight(
+        &self,
+        path: &Path,
+        content: &str,
+        lines: &[String],
+    ) -> anyhow::Result<Vec<Vec<HighlightSpan>>> {
+        let Some(query_src) = self.highlight_query_for(path) else {
+            return Ok(default_highlights(lines));
+        };
+        highlight_tree_sitter(&self.language, query_src, content, lines)
+            .or_else(|_| Ok(default_highlights(lines)))
     }
 }
 
@@ -158,6 +185,8 @@ impl ProjectModel {
                   (function_item return_type: (type_identifier) @call)
                   (function_item return_type: (scoped_type_identifier) @call)
                 ",
+                highlight_query: Some(tree_sitter_rust::HIGHLIGHTS_QUERY),
+                jsx_highlight_query: None,
             }),
             Box::new(TreeSitterPlugin {
                 exts: &["py"],
@@ -170,6 +199,8 @@ impl ProjectModel {
                   (call function: (identifier) @call)
                   (call function: (attribute attribute: (identifier) @call))
                 ",
+                highlight_query: Some(tree_sitter_python::HIGHLIGHTS_QUERY),
+                jsx_highlight_query: None,
             }),
             Box::new(TreeSitterPlugin {
                 exts: &["js", "jsx"],
@@ -186,6 +217,8 @@ impl ProjectModel {
                   (new_expression constructor: (identifier) @call)
                   (new_expression constructor: (member_expression property: (property_identifier) @call))
                 ",
+                highlight_query: Some(tree_sitter_javascript::HIGHLIGHT_QUERY),
+                jsx_highlight_query: Some(tree_sitter_javascript::JSX_HIGHLIGHT_QUERY),
             }),
             Box::new(TreeSitterPlugin {
                 exts: &["ts", "tsx"],
@@ -207,6 +240,8 @@ impl ProjectModel {
                   (new_expression constructor: (member_expression property: (property_identifier) @call))
                   (type_annotation (type_identifier) @call)
                 ",
+                highlight_query: Some(tree_sitter_typescript::HIGHLIGHTS_QUERY),
+                jsx_highlight_query: None,
             }),
             Box::new(FallbackPlugin {
                 exts: Some(&["go"]),
@@ -253,20 +288,19 @@ impl ProjectModel {
                     continue;
                 }
             };
-            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-            let spans = highlight_file(file, &lines);
-            let pf = match plugins.iter().find(|p| p.matches(file)) {
-                Some(plugin) => {
-                    let parts = plugin.parse(file, &content)?;
-                    ParsedFile {
-                        path: file.clone(),
-                        lines,
-                        defs: parts.defs,
-                        calls: parts.calls,
-                        spans,
-                    }
-                }
+            let plugin = match plugins.iter().find(|p| p.matches(file)) {
+                Some(plugin) => plugin,
                 None => continue,
+            };
+            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+            let spans = plugin.highlight(file, &content, &lines)?;
+            let parts = plugin.parse(file, &content)?;
+            let pf = ParsedFile {
+                path: file.clone(),
+                lines,
+                defs: parts.defs,
+                calls: parts.calls,
+                spans,
             };
             for def in &pf.defs {
                 defs.entry(def.name.clone())
@@ -297,20 +331,16 @@ impl ProjectModel {
     }
 }
 
-static SYNTAX: Lazy<(SyntaxSet, Theme)> = Lazy::new(|| {
-    let ss = SyntaxSet::load_defaults_newlines();
-    let theme = load_theme().unwrap_or_else(|| {
-        syntect::highlighting::ThemeSet::load_defaults()
-            .themes
-            .get("base16-ocean.dark")
-            .cloned()
-            .unwrap()
-    });
-    (ss, theme)
-});
-
-fn syntect_color_to_ray(c: syntect::highlighting::Color) -> RayColor {
-    RayColor::new(c.r, c.g, c.b, c.a)
+impl TreeSitterPlugin {
+    fn highlight_query_for(&self, path: &Path) -> Option<&'static str> {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        if ext.ends_with("x") {
+            if let Some(q) = self.jsx_highlight_query {
+                return Some(q);
+            }
+        }
+        self.highlight_query
+    }
 }
 
 fn def_kind(node: Node) -> String {
@@ -337,52 +367,212 @@ fn def_kind(node: Node) -> String {
     n.kind().to_string()
 }
 
-fn load_theme() -> Option<Theme> {
-    let path = std::env::var("TM_THEME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            let p = PathBuf::from("data/themes/Tomorrow-Night-Eighties.tmtheme");
-            if p.exists() { Some(p) } else { None }
-        })?;
-    let folder = path.parent()?;
-    let ts = syntect::highlighting::ThemeSet::load_from_folder(folder).ok()?;
-    let name = path.file_stem()?.to_string_lossy();
-    ts.themes.get(name.as_ref()).cloned()
-}
-
-fn highlight_file(path: &Path, lines: &[String]) -> Vec<Vec<HighlightSpan>> {
-    let (ss, theme) = &*SYNTAX;
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default();
-    let syntax = ss
-        .find_syntax_by_extension(ext)
-        .or_else(|| ss.find_syntax_for_file(path).ok().flatten())
-        .or_else(|| ss.find_syntax_by_token("Rust"))
-        .or_else(|| Some(ss.find_syntax_plain_text()))
-        .unwrap();
-
+fn default_highlights(lines: &[String]) -> Vec<Vec<HighlightSpan>> {
     lines
         .iter()
         .map(|line| {
-            let mut h = HighlightLines::new(syntax, theme);
-            let highlights: Vec<(Style, &str)> = h.highlight_line(line, ss).unwrap_or_default();
-            let mut spans = Vec::new();
-            let mut idx = 0;
-            for (style, text) in highlights {
-                let len = text.len();
-                spans.push(HighlightSpan {
-                    start: idx,
-                    end: idx + len,
-                    color: syntect_color_to_ray(style.foreground),
-                });
-                idx += len;
-            }
-            spans
+            let len = line.len();
+            vec![HighlightSpan {
+                start: 0,
+                end: len,
+                kind: HighlightKind::Plain,
+            }]
         })
         .collect()
+}
+
+#[derive(Clone, Debug)]
+struct HighlightCapture {
+    start_byte: usize,
+    end_byte: usize,
+    start_point: Point,
+    end_point: Point,
+    kind: HighlightKind,
+}
+
+fn highlight_tree_sitter(
+    language: &Language,
+    query_src: &str,
+    content: &str,
+    lines: &[String],
+) -> anyhow::Result<Vec<Vec<HighlightSpan>>> {
+    let mut parser = Parser::new();
+    parser.set_language(language)?;
+    let tree = parser
+        .parse(content, None)
+        .ok_or_else(|| anyhow::anyhow!("parse failed"))?;
+    let root = tree.root_node();
+    let query = Query::new(language, query_src)?;
+    let mut cursor = QueryCursor::new();
+    let mut captures: Vec<HighlightCapture> = Vec::new();
+    let mut capture_iter = cursor.captures(&query, root, content.as_bytes());
+    while let Some((m, idx)) = capture_iter.next() {
+        let cap = m.captures[*idx];
+        let name = query
+            .capture_names()
+            .get(cap.index as usize)
+            .map(|s| *s)
+            .unwrap_or_default();
+        let kind = match highlight_kind_for_capture(name) {
+            Some(k) => k,
+            None => continue,
+        };
+        captures.push(HighlightCapture {
+            start_byte: cap.node.start_byte(),
+            end_byte: cap.node.end_byte(),
+            start_point: cap.node.start_position(),
+            end_point: cap.node.end_position(),
+            kind,
+        });
+    }
+
+    if captures.is_empty() {
+        return Ok(default_highlights(lines));
+    }
+
+    captures.sort_by_key(|c| (c.start_byte, c.end_byte));
+    let mut spans = default_highlights(lines);
+    let line_starts = line_start_bytes(content);
+    for cap in captures {
+        apply_capture(&mut spans, lines, &line_starts, &cap);
+    }
+    Ok(spans)
+}
+
+fn line_start_bytes(content: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    for (idx, byte) in content.bytes().enumerate() {
+        if byte == b'\n' {
+            starts.push(idx + 1);
+        }
+    }
+    starts
+}
+
+fn apply_capture(
+    spans: &mut Vec<Vec<HighlightSpan>>,
+    lines: &[String],
+    line_starts: &[usize],
+    cap: &HighlightCapture,
+) {
+    if spans.is_empty() {
+        return;
+    }
+    let start_row = cap.start_point.row;
+    let mut end_row = cap.end_point.row;
+    if start_row >= spans.len() {
+        return;
+    }
+    if end_row >= spans.len() {
+        end_row = spans.len() - 1;
+    }
+
+    for line_idx in start_row..=end_row {
+        let line = match lines.get(line_idx) {
+            Some(l) => l,
+            None => continue,
+        };
+        let line_start_byte = line_starts.get(line_idx).copied().unwrap_or(0);
+        let local_start = if line_idx == start_row {
+            cap.start_byte.saturating_sub(line_start_byte)
+        } else {
+            0
+        };
+        let local_end = if line_idx == end_row {
+            cap.end_byte.saturating_sub(line_start_byte)
+        } else {
+            line.as_bytes().len()
+        };
+
+        let line_len = line.as_bytes().len();
+        let start_byte = local_start.min(line_len);
+        let end_byte = local_end.min(line_len);
+        if start_byte >= end_byte {
+            continue;
+        }
+        insert_highlight(&mut spans[line_idx], start_byte, end_byte, cap.kind);
+    }
+}
+
+fn insert_highlight(spans: &mut Vec<HighlightSpan>, start: usize, end: usize, kind: HighlightKind) {
+    if start >= end || spans.is_empty() {
+        return;
+    }
+    let mut new_spans = Vec::new();
+    for span in spans.drain(..) {
+        if span.end <= start || span.start >= end {
+            new_spans.push(span);
+            continue;
+        }
+        if span.start < start {
+            new_spans.push(HighlightSpan {
+                start: span.start,
+                end: start,
+                kind: span.kind,
+            });
+        }
+        let mid_end = span.end.min(end);
+        new_spans.push(HighlightSpan {
+            start: start.max(span.start),
+            end: mid_end,
+            kind,
+        });
+        if span.end > end {
+            new_spans.push(HighlightSpan {
+                start: end,
+                end: span.end,
+                kind: span.kind,
+            });
+        }
+    }
+    *spans = merge_spans(new_spans);
+}
+
+fn merge_spans(mut spans: Vec<HighlightSpan>) -> Vec<HighlightSpan> {
+    let mut merged: Vec<HighlightSpan> = Vec::new();
+    for span in spans.drain(..) {
+        if span.start >= span.end {
+            continue;
+        }
+        if let Some(last) = merged.last_mut() {
+            if last.end == span.start && last.kind == span.kind {
+                last.end = span.end;
+                continue;
+            }
+        }
+        merged.push(span);
+    }
+    merged
+}
+
+fn highlight_kind_for_capture(name: &str) -> Option<HighlightKind> {
+    if name.starts_with("comment") {
+        Some(HighlightKind::Comment)
+    } else if name.starts_with("string") {
+        Some(HighlightKind::String)
+    } else if name.starts_with("keyword")
+        || name.starts_with("type")
+        || name.starts_with("constructor")
+        || name.starts_with("constant")
+        || name.starts_with("number")
+        || name.starts_with("operator")
+        || name.starts_with("attribute")
+        || name.contains("macro")
+        || name.contains("builtin")
+    {
+        Some(HighlightKind::Keyword)
+    } else {
+        None
+    }
+}
+
+fn color_for_kind(kind: HighlightKind, palette: &Palette) -> RayColor {
+    match kind {
+        HighlightKind::Plain => palette.text,
+        HighlightKind::Comment => palette.comment,
+        HighlightKind::String => palette.string,
+        HighlightKind::Keyword => palette.keyword,
+    }
 }
 
 pub fn colorized_segments_with_calls(
@@ -399,9 +589,15 @@ pub fn colorized_segments_with_calls(
         .spans
         .get(line_idx)
         .cloned()
-        .unwrap_or_default()
+        .unwrap_or_else(|| {
+            vec![HighlightSpan {
+                start: 0,
+                end: line.len(),
+                kind: HighlightKind::Plain,
+            }]
+        })
         .into_iter()
-        .map(|s| (s.start, s.end, s.color))
+        .map(|s| (s.start, s.end, color_for_kind(s.kind, palette)))
         .collect();
 
     let mut call_ranges: Vec<(usize, usize)> = calls.iter().map(|c| (c.col, c.len)).collect();
@@ -502,7 +698,7 @@ fn parse_tree_sitter(
                 module_path: module_for_path(path),
                 line: pos.row,
                 col: pos.column,
-                len: text.chars().count(),
+                len: text.len(),
             });
         }
     }

@@ -5,7 +5,7 @@ A lightweight, game-like code viewer that lets you explore projects by opening f
 ## Features
 - Raylib UI with draggable, closable code windows; multiple files side by side, plus a minimap.
 - Click any highlighted call/type name to jump to its definition in a new window (prefers same module when available). Single-function/type windows group Rust structs with their impl blocks.
-- Syntax highlighting via `syntect` (keywords/strings/comments + call highlights) plus line numbers.
+- Syntax highlighting via tree-sitter highlight queries (keywords/strings/comments + call highlights) plus line numbers.
 - Breadcrumb bar per window (relative path + module path hint).
 - Sidebar with file list and live search; search results include matching definitions you can jump to.
 - Mouse-wheel scrolling per window; layout (position/size/scroll) is persisted to `.trace_viewer_layout.json` in the project root.
