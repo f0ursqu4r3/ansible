@@ -1,14 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use proc_macro2::Span;
-use syn::visit::Visit;
-use walkdir::WalkDir;
-
 use once_cell::sync::Lazy;
+use proc_macro2::Span;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, Theme};
 use syntect::parsing::SyntaxSet;
+use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
+use walkdir::WalkDir;
+
+use syn::visit::Visit;
 
 use crate::theme::Palette;
 use raylib::prelude::Color as RayColor;
@@ -67,19 +68,169 @@ pub struct ProjectModel {
     pub defs: HashMap<String, Vec<DefinitionLocation>>,
 }
 
+pub struct ParsedComponents {
+    pub defs: Vec<FunctionDef>,
+    pub calls: Vec<FunctionCall>,
+}
+
+pub trait LanguagePlugin {
+    fn language_id(&self) -> &'static str;
+    fn matches(&self, path: &Path) -> bool;
+    fn parse(&self, path: &Path, content: &str) -> anyhow::Result<ParsedComponents>;
+}
+
+pub struct RustPlugin;
+
+impl LanguagePlugin for RustPlugin {
+    fn language_id(&self) -> &'static str {
+        "rust"
+    }
+
+    fn matches(&self, path: &Path) -> bool {
+        path.extension().map(|e| e == "rs").unwrap_or(false)
+    }
+
+    fn parse(&self, path: &Path, content: &str) -> anyhow::Result<ParsedComponents> {
+        parse_rust(path, content)
+    }
+}
+
+pub struct FallbackPlugin {
+    pub id: &'static str,
+    pub exts: Option<&'static [&'static str]>,
+}
+
+impl LanguagePlugin for FallbackPlugin {
+    fn language_id(&self) -> &'static str {
+        self.id
+    }
+
+    fn matches(&self, path: &Path) -> bool {
+        match self.exts {
+            Some(exts) => path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| exts.contains(&e))
+                .unwrap_or(false),
+            None => true,
+        }
+    }
+
+    fn parse(&self, _path: &Path, _content: &str) -> anyhow::Result<ParsedComponents> {
+        Ok(ParsedComponents {
+            defs: Vec::new(),
+            calls: Vec::new(),
+        })
+    }
+}
+
+pub struct TreeSitterPlugin {
+    pub id: &'static str,
+    pub exts: &'static [&'static str],
+    pub language: Language,
+    pub def_query: &'static str,
+    pub call_query: &'static str,
+}
+
+impl LanguagePlugin for TreeSitterPlugin {
+    fn language_id(&self) -> &'static str {
+        self.id
+    }
+
+    fn matches(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|ext| self.exts.contains(&ext))
+            .unwrap_or(false)
+    }
+
+    fn parse(&self, path: &Path, content: &str) -> anyhow::Result<ParsedComponents> {
+        parse_tree_sitter(
+            path,
+            content,
+            &self.language,
+            self.def_query,
+            self.call_query,
+        )
+    }
+}
+
 impl ProjectModel {
     pub fn load(root: impl AsRef<Path>) -> anyhow::Result<Self> {
         let root = root.as_ref().to_path_buf();
+        let plugins: Vec<Box<dyn LanguagePlugin>> = vec![
+            Box::new(TreeSitterPlugin {
+                id: "rust",
+                exts: &["rs"],
+                language: tree_sitter_rust::LANGUAGE.into(),
+                def_query: "(function_item name: (identifier) @name)",
+                call_query: "(call_expression function: (identifier) @call)",
+            }),
+            Box::new(TreeSitterPlugin {
+                id: "python",
+                exts: &["py"],
+                language: tree_sitter_python::LANGUAGE.into(),
+                def_query: "(function_definition name: (identifier) @name)",
+                call_query: "
+                  (call function: (identifier) @call)
+                  (call function: (attribute attribute: (identifier) @call))
+                ",
+            }),
+            Box::new(TreeSitterPlugin {
+                id: "javascript",
+                exts: &["js", "jsx"],
+                language: tree_sitter_javascript::LANGUAGE.into(),
+                def_query: "
+                  (function_declaration name: (identifier) @name)
+                  (method_definition name: (property_identifier) @name)
+                ",
+                call_query: "
+                  (call_expression function: (identifier) @call)
+                  (call_expression function: (member_expression property: (property_identifier) @call))
+                ",
+            }),
+            Box::new(TreeSitterPlugin {
+                id: "typescript",
+                exts: &["ts", "tsx"],
+                language: tree_sitter_typescript::LANGUAGE_TSX.into(),
+                def_query: "
+                  (function_declaration name: (identifier) @name)
+                  (method_signature name: (property_identifier) @name)
+                  (method_definition name: (property_identifier) @name)
+                ",
+                call_query: "
+                  (call_expression function: (identifier) @call)
+                  (call_expression function: (member_expression property: (property_identifier) @call))
+                ",
+            }),
+            Box::new(FallbackPlugin {
+                id: "go",
+                exts: Some(&["go"]),
+            }),
+            Box::new(FallbackPlugin {
+                id: "c-cpp",
+                exts: Some(&["c", "h", "cpp", "cc", "hpp", "cxx"]),
+            }),
+            Box::new(FallbackPlugin {
+                id: "kotlin",
+                exts: Some(&["kt", "kts"]),
+            }),
+            Box::new(FallbackPlugin {
+                id: "java",
+                exts: Some(&["java"]),
+            }),
+            Box::new(FallbackPlugin {
+                id: "swift",
+                exts: Some(&["swift"]),
+            }),
+        ];
         let mut files = Vec::new();
-        for entry in WalkDir::new(&root) {
+        for entry in WalkDir::new(&root).into_iter().filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !(name.starts_with(".git") || name == "target" || name == "data")
+        }) {
             let entry = entry?;
-            if entry.file_type().is_file()
-                && entry
-                    .path()
-                    .extension()
-                    .map(|ext| ext == "rs")
-                    .unwrap_or(false)
-            {
+            if entry.file_type().is_file() && plugins.iter().any(|p| p.matches(entry.path())) {
                 files.push(entry.into_path());
             }
         }
@@ -88,7 +239,35 @@ impl ProjectModel {
         let mut parsed = HashMap::new();
         let mut defs: HashMap<String, Vec<DefinitionLocation>> = HashMap::new();
         for file in &files {
-            let pf = parse_rust_file(file)?;
+            let bytes = match std::fs::read(file) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("Skipping {}: {}", file.display(), e);
+                    continue;
+                }
+            };
+            let content = match String::from_utf8(bytes) {
+                Ok(s) => s,
+                Err(_) => {
+                    eprintln!("Skipping non-UTF8 file {}", file.display());
+                    continue;
+                }
+            };
+            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+            let spans = highlight_file(file, &lines);
+            let pf = match plugins.iter().find(|p| p.matches(file)) {
+                Some(plugin) => {
+                    let parts = plugin.parse(file, &content)?;
+                    ParsedFile {
+                        path: file.clone(),
+                        lines,
+                        defs: parts.defs,
+                        calls: parts.calls,
+                        spans,
+                    }
+                }
+                None => continue,
+            };
             for def in &pf.defs {
                 defs.entry(def.name.clone())
                     .or_default()
@@ -148,10 +327,15 @@ fn load_theme() -> Option<Theme> {
     ts.themes.get(name.as_ref()).cloned()
 }
 
-fn highlight_file(lines: &[String]) -> Vec<Vec<HighlightSpan>> {
+fn highlight_file(path: &Path, lines: &[String]) -> Vec<Vec<HighlightSpan>> {
     let (ss, theme) = &*SYNTAX;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
     let syntax = ss
-        .find_syntax_by_extension("rs")
+        .find_syntax_by_extension(ext)
+        .or_else(|| ss.find_syntax_for_file(path).ok().flatten())
         .or_else(|| ss.find_syntax_by_token("Rust"))
         .or_else(|| Some(ss.find_syntax_plain_text()))
         .unwrap();
@@ -238,24 +422,6 @@ pub fn colorized_segments_with_calls(
     segments
 }
 
-pub fn parse_rust_file(path: &Path) -> anyhow::Result<ParsedFile> {
-    let content = std::fs::read_to_string(path)?;
-    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-    let spans = highlight_file(&lines);
-
-    let file = syn::parse_file(&content)?;
-    let mut collector = SyntaxCollector::new(path, &content);
-    collector.visit_file(&file);
-
-    Ok(ParsedFile {
-        path: path.to_path_buf(),
-        lines,
-        defs: collector.defs,
-        calls: collector.calls,
-        spans,
-    })
-}
-
 fn span_to_line_col(span: Span) -> Option<(usize, usize)> {
     let start = span.start();
     Some((start.line.saturating_sub(1), start.column))
@@ -272,6 +438,84 @@ fn span_to_len(span: Span, source: &str) -> Option<usize> {
     let start_idx = start.column.min(line.len());
     let end_idx = end.column.min(line.len());
     Some(end_idx.saturating_sub(start_idx))
+}
+
+fn node_text<'a>(node: Node<'a>, source: &'a str) -> Option<&'a str> {
+    let range = node.byte_range();
+    source.get(range)
+}
+
+fn parse_tree_sitter(
+    path: &Path,
+    content: &str,
+    language: &Language,
+    def_query_src: &str,
+    call_query_src: &str,
+) -> anyhow::Result<ParsedComponents> {
+    let mut parser = Parser::new();
+    parser.set_language(language)?;
+    let tree = parser
+        .parse(content, None)
+        .ok_or_else(|| anyhow::anyhow!("parse failed"))?;
+    let root = tree.root_node();
+    let mut defs = Vec::new();
+    let mut calls = Vec::new();
+    let bytes = content.as_bytes();
+    let mut cursor = QueryCursor::new();
+    let def_query = Query::new(language, def_query_src)?;
+    let mut def_matches = cursor.matches(&def_query, root, bytes);
+    while let Some(m) = def_matches.next() {
+        for cap in m.captures.iter() {
+            let text = match node_text(cap.node, content) {
+                Some(t) => t,
+                None => continue,
+            };
+            let pos = cap.node.start_position();
+            defs.push(FunctionDef {
+                name: text.to_string(),
+                module_path: module_for_path(path),
+                line: pos.row,
+                col: pos.column,
+            });
+        }
+    }
+    let call_query = Query::new(language, call_query_src)?;
+    let mut call_cursor = QueryCursor::new();
+    let mut call_matches = call_cursor.matches(&call_query, root, bytes);
+    while let Some(m) = call_matches.next() {
+        for cap in m.captures.iter() {
+            let text = match node_text(cap.node, content) {
+                Some(t) => t,
+                None => continue,
+            };
+            let pos = cap.node.start_position();
+            calls.push(FunctionCall {
+                name: text.to_string(),
+                module_path: module_for_path(path),
+                line: pos.row,
+                col: pos.column,
+                len: text.chars().count(),
+            });
+        }
+    }
+    Ok(ParsedComponents { defs, calls })
+}
+
+fn module_for_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("module")
+        .to_string()
+}
+
+fn parse_rust(path: &Path, content: &str) -> anyhow::Result<ParsedComponents> {
+    let file = syn::parse_file(content)?;
+    let mut collector = SyntaxCollector::new(path, content);
+    collector.visit_file(&file);
+    Ok(ParsedComponents {
+        defs: collector.defs,
+        calls: collector.calls,
+    })
 }
 
 struct SyntaxCollector<'a> {

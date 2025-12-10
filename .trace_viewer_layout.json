@@ -2,18 +2,64 @@
   "windows": [
     {
       "file": "src/app.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 91,
+        "end": 102,
+        "title": "app.rs - single_fn_title"
+      },
+      "position": [
+        1236.4883,
+        -123.75391
+      ],
+      "size": [
+        913.1836,
+        313.23438
+      ],
+      "scroll": 0.0,
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src/app.rs",
+        "line": 166
+      }
+    },
+    {
+      "file": "src/app.rs",
       "view_kind": null,
       "position": [
-        284.0,
-        40.0
+        86.83984,
+        -291.23438
+      ],
+      "size": [
+        932.76953,
+        1227.332
+      ],
+      "scroll": 3323.5178,
+      "scroll_x": 0.0,
+      "link_from": null
+    },
+    {
+      "file": "src/code_window.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 153,
+        "end": 159,
+        "title": "code_window.rs - clamp_window_scroll"
+      },
+      "position": [
+        1339.8164,
+        313.45312
       ],
       "size": [
         720.0,
-        1016.85156
+        460.0
       ],
-      "scroll": 1893.9774,
+      "scroll": 0.0,
       "scroll_x": 0.0,
-      "link_from": null
+      "link_from": {
+        "file": "src/app.rs",
+        "line": 201
+      }
     }
   ],
   "sidebar_scroll": 0.0,
