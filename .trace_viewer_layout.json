@@ -13,11 +13,49 @@
         -520.6349
       ],
       "size": [
-        926.0,
+        986.0,
         1136.0
       ],
-      "scroll": 5414.406,
-      "scroll_x": 38.4
+      "scroll": 15234.28,
+      "scroll_x": 0.0
+    },
+    {
+      "file": "src\\app.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 677,
+        "end": 700,
+        "title": "crate"
+      },
+      "position": [
+        -448.8152,
+        -373.77283
+      ],
+      "size": [
+        720.0,
+        562.0
+      ],
+      "scroll": 12958.4,
+      "scroll_x": 0.0
+    },
+    {
+      "file": "src\\app.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 652,
+        "end": 676,
+        "title": "crate"
+      },
+      "position": [
+        -448.24524,
+        198.8457
+      ],
+      "size": [
+        720.0,
+        566.0
+      ],
+      "scroll": 12478.4,
+      "scroll_x": 0.0
     }
   ],
   "sidebar_scroll": 0.0,

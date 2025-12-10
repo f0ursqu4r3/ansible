@@ -14,7 +14,7 @@ mod theme;
 
 use app::AppState;
 use constants::*;
-use theme::{ColorKind, Palette, default_palette, load_tmtheme_palette};
+use theme::{Palette, default_palette, load_tmtheme_palette};
 
 pub enum AppFont {
     Owned(Font),
@@ -179,19 +179,11 @@ pub fn draw_segments(
     font: &AppFont,
     base_x: f32,
     y: f32,
-    segments: &[(String, ColorKind)],
-    palette: &Palette,
+    segments: &[(String, Color)],
 ) {
     let mut x = base_x;
     for (text, color) in segments {
-        let c = match color {
-            ColorKind::Text => palette.text,
-            ColorKind::Comment => palette.comment,
-            ColorKind::String => palette.string,
-            ColorKind::Keyword => palette.keyword,
-            ColorKind::Call => palette.call,
-        };
-        font.draw_text_ex(d, text, Vector2::new(x, y), FONT_SIZE, 0.0, c);
+        font.draw_text_ex(d, text, Vector2::new(x, y), FONT_SIZE, 0.0, *color);
         x += font.measure_width(text, FONT_SIZE, 0.0);
     }
 }

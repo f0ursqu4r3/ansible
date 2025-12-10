@@ -4,8 +4,10 @@ use raylib::prelude::*;
 
 use crate::constants::{BREADCRUMB_HEIGHT, CODE_X_OFFSET, LINE_HEIGHT, TITLE_BAR_HEIGHT};
 use crate::icons::{Icon, Icons};
-use crate::model::{DefinitionLocation, FunctionCall, ParsedFile, ProjectModel, colorize_line};
-use crate::theme::{ColorKind, Palette};
+use crate::model::{
+    colorized_segments_with_calls, DefinitionLocation, FunctionCall, ParsedFile, ProjectModel,
+};
+use crate::theme::Palette;
 use crate::{AppFont, FONT_SIZE, draw_segments, point_in_rect, token_rect};
 
 pub const RESIZE_HANDLE: f32 = 14.0;
@@ -395,8 +397,8 @@ pub fn draw_code(
         let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
 
         let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
-        let segments = colorize_line(line, &calls);
-        draw_segments(&mut scoped, font, text_start_x, y, &segments, palette);
+        let segments = colorized_segments_with_calls(file, idx, &calls, palette);
+        draw_segments(&mut scoped, font, text_start_x, y, &segments);
 
         font.draw_text_ex(
             &mut scoped,
@@ -435,7 +437,7 @@ pub fn draw_code(
                 break;
             }
             let calls: Vec<&FunctionCall> = file.calls_on_line(idx).collect();
-            let segments = colorize_line(line, &calls);
+            let segments = colorized_segments_with_calls(file, idx, &calls, palette);
             let mut x = mini.x + 2.0;
             for (text, color) in segments {
                 let width = font
@@ -445,14 +447,13 @@ pub fn draw_code(
                 if w <= 0.5 {
                     continue;
                 }
-                let c = match color {
-                    ColorKind::Text => palette.text,
-                    ColorKind::Comment => palette.comment,
-                    ColorKind::String => palette.string,
-                    ColorKind::Keyword => palette.keyword,
-                    ColorKind::Call => palette.call,
-                };
-                scoped.draw_rectangle(x as i32, line_y as i32, w as i32, block_height as i32, c);
+                scoped.draw_rectangle(
+                    x as i32,
+                    line_y as i32,
+                    w as i32,
+                    block_height as i32,
+                    color,
+                );
                 x += w;
                 if x > mini.x + mini.width - 2.0 {
                     break;

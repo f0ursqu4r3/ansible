@@ -22,6 +22,7 @@ name = "ansible"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "once_cell",
  "plist",
  "png 0.18.0",
  "proc-macro2",

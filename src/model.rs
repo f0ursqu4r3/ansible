@@ -5,7 +5,13 @@ use proc_macro2::Span;
 use syn::visit::Visit;
 use walkdir::WalkDir;
 
-use crate::theme::ColorKind;
+use once_cell::sync::Lazy;
+use syntect::highlighting::{Style, Theme};
+use syntect::parsing::SyntaxSet;
+use syntect::easy::HighlightLines;
+
+use crate::theme::Palette;
+use raylib::prelude::Color as RayColor;
 
 #[derive(Clone, Debug)]
 pub struct FunctionDef {
@@ -30,6 +36,7 @@ pub struct ParsedFile {
     pub lines: Vec<String>,
     pub defs: Vec<FunctionDef>,
     pub calls: Vec<FunctionCall>,
+    pub spans: Vec<Vec<HighlightSpan>>,
 }
 
 impl ParsedFile {
@@ -44,6 +51,13 @@ pub struct DefinitionLocation {
     pub module_path: String,
     pub line: usize,
     pub col: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct HighlightSpan {
+    pub start: usize,
+    pub end: usize,
+    pub color: RayColor,
 }
 
 pub struct ProjectModel {
@@ -104,97 +118,127 @@ impl ProjectModel {
     }
 }
 
-pub fn colorize_line(line: &str, calls: &[&FunctionCall]) -> Vec<(String, ColorKind)> {
-    let mut segments: Vec<(String, ColorKind)> = Vec::new();
-    let mut i = 0;
-    let bytes = line.as_bytes();
-    let len = bytes.len();
+static SYNTAX: Lazy<(SyntaxSet, Theme)> = Lazy::new(|| {
+    let ss = SyntaxSet::load_defaults_newlines();
+    let theme = load_theme().unwrap_or_else(|| {
+        syntect::highlighting::ThemeSet::load_defaults()
+            .themes
+            .get("base16-ocean.dark")
+            .cloned()
+            .unwrap()
+    });
+    (ss, theme)
+});
+
+fn syntect_color_to_ray(c: syntect::highlighting::Color) -> RayColor {
+    RayColor::new(c.r, c.g, c.b, c.a)
+}
+
+fn load_theme() -> Option<Theme> {
+    let path = std::env::var("TM_THEME")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            let p = PathBuf::from("data/themes/Tomorrow-Night-Eighties.tmtheme");
+            if p.exists() {
+                Some(p)
+            } else {
+                None
+            }
+        })?;
+    let folder = path.parent()?;
+    let ts = syntect::highlighting::ThemeSet::load_from_folder(folder).ok()?;
+    let name = path.file_stem()?.to_string_lossy();
+    ts.themes.get(name.as_ref()).cloned()
+}
+
+fn highlight_file(lines: &[String]) -> Vec<Vec<HighlightSpan>> {
+    let (ss, theme) = &*SYNTAX;
+    let syntax = ss
+        .find_syntax_by_extension("rs")
+        .or_else(|| ss.find_syntax_by_token("Rust"))
+        .or_else(|| Some(ss.find_syntax_plain_text()))
+        .unwrap();
+
+    lines
+        .iter()
+        .map(|line| {
+            let mut h = HighlightLines::new(syntax, theme);
+            let highlights: Vec<(Style, &str)> = h.highlight_line(line, ss).unwrap_or_default();
+            let mut spans = Vec::new();
+            let mut idx = 0;
+            for (style, text) in highlights {
+                let len = text.len();
+                spans.push(HighlightSpan {
+                    start: idx,
+                    end: idx + len,
+                    color: syntect_color_to_ray(style.foreground),
+                });
+                idx += len;
+            }
+            spans
+        })
+        .collect()
+}
+
+pub fn colorized_segments_with_calls(
+    pf: &ParsedFile,
+    line_idx: usize,
+    calls: &[&FunctionCall],
+    palette: &Palette,
+) -> Vec<(String, RayColor)> {
+    if line_idx >= pf.lines.len() {
+        return Vec::new();
+    }
+    let line = &pf.lines[line_idx];
+    let mut spans: Vec<(usize, usize, RayColor)> = pf.spans.get(line_idx).cloned().unwrap_or_default().into_iter().map(|s| (s.start, s.end, s.color)).collect();
+
     let mut call_ranges: Vec<(usize, usize)> = calls.iter().map(|c| (c.col, c.len)).collect();
     call_ranges.sort_by_key(|r| r.0);
 
-    while i < len {
-        if let Some(&(start, clen)) = call_ranges.iter().find(|&&(s, _)| s == i) {
-            let text = line[start..start + clen].to_string();
-            append_segment(&mut segments, text, ColorKind::Call);
-            i += clen;
-            continue;
-        }
-
-        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
-            let text = line[i..].to_string();
-            append_segment(&mut segments, text, ColorKind::Comment);
-            break;
-        }
-
-        if bytes[i] == b'"' {
-            let start = i;
-            i += 1;
-            let mut escaped = false;
-            while i < len {
-                let b = bytes[i];
-                if b == b'\\' && !escaped {
-                    escaped = true;
-                    i += 1;
-                    continue;
-                }
-                if b == b'"' && !escaped {
-                    i += 1;
-                    break;
-                }
-                escaped = false;
-                i += 1;
+    for (call_start, call_len) in call_ranges {
+        let call_end = call_start + call_len;
+        let mut new_spans = Vec::new();
+        for (s, e, col) in spans {
+            if e <= call_start || s >= call_end {
+                new_spans.push((s, e, col));
+                continue;
             }
-            let text = line[start..i].to_string();
-            append_segment(&mut segments, text, ColorKind::String);
-            continue;
-        }
-
-        let b = bytes[i];
-        if b.is_ascii_alphabetic() || b == b'_' {
-            let start = i;
-            i += 1;
-            while i < len {
-                let b = bytes[i];
-                if b.is_ascii_alphanumeric() || b == b'_' {
-                    i += 1;
-                } else {
-                    break;
-                }
+            if s < call_start {
+                new_spans.push((s, call_start, col));
             }
-            let word = &line[start..i];
-            let color = if KEYWORDS.iter().any(|k| *k == word) {
-                ColorKind::Keyword
-            } else {
-                ColorKind::Text
-            };
-            append_segment(&mut segments, word.to_string(), color);
+            let mid_end = e.min(call_end);
+            new_spans.push((call_start.max(s), mid_end, palette.call));
+            if e > call_end {
+                new_spans.push((call_end, e, col));
+            }
+        }
+        spans = new_spans;
+    }
+
+    let mut segments: Vec<(String, RayColor)> = Vec::new();
+    for (s, e, col) in spans {
+        if s >= e || s >= line.len() {
             continue;
         }
-
-        let ch = &line[i..i + 1];
-        append_segment(&mut segments, ch.to_string(), ColorKind::Text);
-        i += 1;
+        let end = e.min(line.len());
+        let text = line[s..end].to_string();
+        if let Some((last_text, last_col)) = segments.last_mut() {
+            if *last_col == col {
+                last_text.push_str(&text);
+                continue;
+            }
+        }
+        segments.push((text, col));
     }
 
     segments
 }
 
-fn append_segment(segments: &mut Vec<(String, ColorKind)>, text: String, color: ColorKind) {
-    if text.is_empty() {
-        return;
-    }
-    if let Some((last_text, last_color)) = segments.last_mut() {
-        if last_color == &color {
-            last_text.push_str(&text);
-            return;
-        }
-    }
-    segments.push((text, color));
-}
-
 pub fn parse_rust_file(path: &Path) -> anyhow::Result<ParsedFile> {
     let content = std::fs::read_to_string(path)?;
     let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let spans = highlight_file(&lines);
 
     let file = syn::parse_file(&content)?;
     let mut collector = SyntaxCollector::new(path, &content);
@@ -205,6 +249,7 @@ pub fn parse_rust_file(path: &Path) -> anyhow::Result<ParsedFile> {
         lines,
         defs: collector.defs,
         calls: collector.calls,
+        spans,
     })
 }
 
