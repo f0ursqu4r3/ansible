@@ -146,6 +146,14 @@ impl ProjectModel {
                   (call_expression function: (field_expression field: (field_identifier) @call))
                   (struct_expression name: (type_identifier) @call)
                   (struct_expression name: (scoped_type_identifier) @call)
+                  (parameter type: (type_identifier) @call)
+                  (parameter type: (scoped_type_identifier) @call)
+                  (generic_type type: (type_identifier) @call)
+                  (generic_type type: (scoped_type_identifier) @call)
+                  (reference_type type: (type_identifier) @call)
+                  (reference_type type: (scoped_type_identifier) @call)
+                  (function_item return_type: (type_identifier) @call)
+                  (function_item return_type: (scoped_type_identifier) @call)
                 ",
             }),
             Box::new(TreeSitterPlugin {

@@ -79,6 +79,7 @@ pub struct AppState {
     pan_start: Vector2,
     zoom: f32,
     minimap_dragging: bool,
+    last_mouse_world: Option<Vector2>,
 }
 
 struct MinimapContext {
@@ -120,6 +121,7 @@ impl AppState {
             pan_start: Vector2::new(0.0, 0.0),
             zoom: 1.0,
             minimap_dragging: false,
+            last_mouse_world: None,
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -324,9 +326,28 @@ impl AppState {
         screen_w: f32,
         screen_h: f32,
     ) {
+        let mut world_mouse = Vector2::new(
+            mouse.x / self.zoom - self.pan.x,
+            mouse.y / self.zoom - self.pan.y,
+        );
+        self.last_mouse_world = Some(world_mouse);
+
         if ctrl_down && wheel.abs() > f32::EPSILON {
             let factor = 1.0 + wheel * 0.1;
-            self.zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+            let new_zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+            if (new_zoom - self.zoom).abs() > f32::EPSILON {
+                let world_anchor = world_mouse;
+                self.zoom = new_zoom;
+                self.pan = Vector2::new(
+                    mouse.x / self.zoom - world_anchor.x,
+                    mouse.y / self.zoom - world_anchor.y,
+                );
+                world_mouse = Vector2::new(
+                    mouse.x / self.zoom - self.pan.x,
+                    mouse.y / self.zoom - self.pan.y,
+                );
+                self.last_mouse_world = Some(world_mouse);
+            }
             return;
         }
 
@@ -382,11 +403,6 @@ impl AppState {
                 return;
             }
         }
-
-        let world_mouse = Vector2::new(
-            mouse.x / self.zoom - self.pan.x,
-            mouse.y / self.zoom - self.pan.y,
-        );
 
         if !left_down {
             for w in &mut self.windows {

@@ -14,6 +14,29 @@
       "scroll": 16656.217,
       "scroll_x": 0.0,
       "link_from": null
+    },
+    {
+      "file": "src/code_window.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 382,
+        "end": 442,
+        "title": "draw_window"
+      },
+      "position": [
+        1188.9609,
+        -289.0664
+      ],
+      "size": [
+        720.0,
+        460.0
+      ],
+      "scroll": 783.2001,
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src/app.rs",
+        "line": 892
+      }
     }
   ],
   "sidebar_scroll": 0.0,
