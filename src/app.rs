@@ -17,8 +17,8 @@ use crate::theme::Palette;
 use crate::{AppFont, point_in_rect};
 use serde::{Deserialize, Serialize};
 
-const MIN_ZOOM: f32 = 0.5;
-const MAX_ZOOM: f32 = 2.0;
+const MIN_ZOOM: f32 = 0.1;
+const MAX_ZOOM: f32 = 1.0;
 const MINIMAP_W: f32 = 220.0;
 const MINIMAP_H: f32 = 160.0;
 const MINIMAP_MARGIN: f32 = 10.0;
@@ -849,7 +849,14 @@ impl AppState {
         } else {
             None
         };
-        d.clear_background(self.palette.bg);
+        // draw background 20% darker
+        let dark_bg = Color {
+            r: (self.palette.bg.r as f32 * 0.8) as u8,
+            g: (self.palette.bg.g as f32 * 0.8) as u8,
+            b: (self.palette.bg.b as f32 * 0.8) as u8,
+            a: self.palette.bg.a,
+        };
+        d.clear_background(dark_bg);
         let world_mouse = Vector2::new(
             mouse.x / self.zoom - self.pan.x,
             mouse.y / self.zoom - self.pan.y,
@@ -871,7 +878,13 @@ impl AppState {
                 }
                 if hover_cursor.is_none() {
                     if let Some(pf) = self.project.parsed.get(&self.windows[idx].file) {
-                        if code_window::is_over_call(font, pf, &self.windows[idx], world_mouse) {
+                        if code_window::is_over_call(
+                            font,
+                            pf,
+                            &self.windows[idx],
+                            world_mouse,
+                            &self.project,
+                        ) {
                             hover_cursor = Some(MouseCursor::MOUSE_CURSOR_POINTING_HAND);
                         }
                     }
@@ -933,10 +946,14 @@ impl AppState {
             if let Some(origin) = &fn_win.link_from {
                 if let Some(idx) = self.windows.iter().position(|w| w.file == origin.file) {
                     if let Some(caller) = self.windows.get(idx) {
-                        let valid = caller.call_refs.iter().any(|c| {
+                        let strict_match = caller.call_refs.iter().any(|c| {
                             c.line == origin.line && c.name == fn_name && c.module_path == fn_module
                         });
-                        if valid {
+                        let loose_match = caller
+                            .call_refs
+                            .iter()
+                            .any(|c| c.line == origin.line && c.name == fn_name);
+                        if strict_match || loose_match {
                             callers.push((idx, origin.line));
                         }
                     }
@@ -947,11 +964,18 @@ impl AppState {
                 if idx == fn_idx {
                     continue;
                 }
-                let matches: Vec<&code_window::CallRef> = caller_win
+                let mut matches: Vec<&code_window::CallRef> = caller_win
                     .call_refs
                     .iter()
                     .filter(|c| c.name == fn_name && c.module_path == fn_module)
                     .collect();
+                if matches.is_empty() {
+                    matches = caller_win
+                        .call_refs
+                        .iter()
+                        .filter(|c| c.name == fn_name)
+                        .collect();
+                }
                 if matches.is_empty() {
                     continue;
                 }

@@ -738,39 +738,12 @@ pub fn hit_test_calls(
     None
 }
 
-pub fn is_over_call(font: &AppFont, file: &ParsedFile, win: &CodeWindow, mouse: Vector2) -> bool {
-    let content_rect = win.content_rect_at(Vector2::new(0.0, 0.0));
-    let (view_start, view_lines) = win.view_lines(file);
-    let content_top = content_rect.y + BREADCRUMB_HEIGHT;
-    let local_y = mouse.y - content_top + win.scroll;
-    if local_y < 0.0 {
-        return false;
-    }
-    let line_idx = (local_y / LINE_HEIGHT).floor() as usize;
-    if line_idx >= view_lines.len() {
-        return false;
-    }
-    let line_idx = view_start + line_idx;
-    let local_idx = line_idx.saturating_sub(view_start);
-    let line = &file.lines[line_idx];
-    let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
-    if calls.is_empty() {
-        return false;
-    }
-
-    for call in calls {
-        let rect = token_rect(
-            font,
-            line,
-            call.col,
-            call.len,
-            content_rect.x + CODE_X_OFFSET - win.scroll_x,
-            content_top + (local_idx as f32 * LINE_HEIGHT) - win.scroll,
-        );
-        if point_in_rect(mouse, rect) {
-            return true;
-        }
-    }
-
-    false
+pub fn is_over_call(
+    font: &AppFont,
+    file: &ParsedFile,
+    win: &CodeWindow,
+    mouse: Vector2,
+    project: &ProjectModel,
+) -> bool {
+    hit_test_calls(font, file, win, mouse, project).is_some()
 }

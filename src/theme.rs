@@ -26,15 +26,6 @@ pub struct Palette {
     pub breadcrumb: Color,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum ColorKind {
-    Text,
-    Comment,
-    String,
-    Keyword,
-    Call,
-}
-
 pub fn default_palette() -> Palette {
     Palette {
         bg: Color::new(18, 18, 24, 255),

@@ -77,7 +77,7 @@ fn main() -> Result<()> {
     let (mut rl, thread) = raylib::init()
         .size(1280, 780)
         .resizable()
-        .title("Rust Trace Viewer")
+        .title("Code Trace Viewer")
         .msaa_4x()
         .build();
     rl.set_target_fps(60);

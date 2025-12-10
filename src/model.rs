@@ -132,13 +132,29 @@ impl ProjectModel {
             Box::new(TreeSitterPlugin {
                 exts: &["rs"],
                 language: tree_sitter_rust::LANGUAGE.into(),
-                def_query: "(function_item name: (identifier) @name)",
-                call_query: "(call_expression function: (identifier) @call)",
+                def_query: "
+                  (function_item name: (identifier) @name)
+                  (struct_item name: (type_identifier) @name)
+                  (enum_item name: (type_identifier) @name)
+                  (union_item name: (type_identifier) @name)
+                  (type_item name: (type_identifier) @name)
+                  (trait_item name: (type_identifier) @name)
+                ",
+                call_query: "
+                  (call_expression function: (identifier) @call)
+                  (call_expression function: (scoped_identifier name: (identifier) @call))
+                  (call_expression function: (field_expression field: (field_identifier) @call))
+                  (struct_expression name: (type_identifier) @call)
+                  (struct_expression name: (scoped_type_identifier) @call)
+                ",
             }),
             Box::new(TreeSitterPlugin {
                 exts: &["py"],
                 language: tree_sitter_python::LANGUAGE.into(),
-                def_query: "(function_definition name: (identifier) @name)",
+                def_query: "
+                  (function_definition name: (identifier) @name)
+                  (class_definition name: (identifier) @name)
+                ",
                 call_query: "
                   (call function: (identifier) @call)
                   (call function: (attribute attribute: (identifier) @call))
@@ -150,10 +166,14 @@ impl ProjectModel {
                 def_query: "
                   (function_declaration name: (identifier) @name)
                   (method_definition name: (property_identifier) @name)
+                  (class_declaration name: (identifier) @name)
+                  (class name: (identifier) @name)
                 ",
                 call_query: "
                   (call_expression function: (identifier) @call)
                   (call_expression function: (member_expression property: (property_identifier) @call))
+                  (new_expression constructor: (identifier) @call)
+                  (new_expression constructor: (member_expression property: (property_identifier) @call))
                 ",
             }),
             Box::new(TreeSitterPlugin {
@@ -163,10 +183,18 @@ impl ProjectModel {
                   (function_declaration name: (identifier) @name)
                   (method_signature name: (property_identifier) @name)
                   (method_definition name: (property_identifier) @name)
+                  (class_declaration name: (type_identifier) @name)
+                  (abstract_class_declaration name: (type_identifier) @name)
+                  (interface_declaration name: (type_identifier) @name)
+                  (enum_declaration name: (identifier) @name)
+                  (type_alias_declaration name: (type_identifier) @name)
                 ",
                 call_query: "
                   (call_expression function: (identifier) @call)
                   (call_expression function: (member_expression property: (property_identifier) @call))
+                  (new_expression constructor: (identifier) @call)
+                  (new_expression constructor: (member_expression property: (property_identifier) @call))
+                  (type_annotation (type_identifier) @call)
                 ",
             }),
             Box::new(FallbackPlugin {
@@ -441,6 +469,8 @@ fn parse_tree_sitter(
             });
         }
     }
+    defs.sort_by_key(|d| d.line);
+    calls.sort_by_key(|c| c.line);
     Ok(ParsedComponents { defs, calls })
 }
 
@@ -451,13 +481,22 @@ fn module_for_path(path: &Path) -> String {
         .to_string()
 }
 pub fn find_function_span(pf: &ParsedFile, line: usize) -> Option<(usize, usize)> {
-    let start = pf.defs.iter().find(|d| d.line == line).map(|d| d.line)?;
-    let mut end = pf.lines.len().saturating_sub(1);
-    for def in &pf.defs {
-        if def.line > start {
-            end = def.line.saturating_sub(1);
-            break;
-        }
+    if pf.defs.is_empty() {
+        return None;
     }
-    Some((start, end))
+    let mut defs: Vec<&FunctionDef> = pf.defs.iter().collect();
+    defs.sort_by_key(|d| d.line);
+
+    let idx = defs
+        .iter()
+        .position(|d| d.line == line)
+        .or_else(|| defs.iter().rposition(|d| d.line <= line))?;
+    let start = defs[idx].line;
+    let end = defs
+        .iter()
+        .skip(idx + 1)
+        .find(|d| d.line > start)
+        .map(|d| d.line.saturating_sub(1))
+        .unwrap_or_else(|| pf.lines.len().saturating_sub(1));
+    Some((start, end.min(pf.lines.len().saturating_sub(1))))
 }
