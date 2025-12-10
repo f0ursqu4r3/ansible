@@ -19,6 +19,13 @@ use serde::{Deserialize, Serialize};
 
 const MIN_ZOOM: f32 = 0.5;
 const MAX_ZOOM: f32 = 2.0;
+const MINIMAP_W: f32 = 220.0;
+const MINIMAP_H: f32 = 160.0;
+const MINIMAP_MARGIN: f32 = 10.0;
+const MINIMAP_PAD: f32 = 8.0;
+const MINIMAP_BTN_W: f32 = 56.0;
+const MINIMAP_BTN_H: f32 = 18.0;
+const MINIMAP_BTN_GAP: f32 = 6.0;
 
 #[derive(Serialize, Deserialize)]
 struct SavedWindow {
@@ -63,6 +70,14 @@ pub struct AppState {
     pan_anchor: Vector2,
     pan_start: Vector2,
     zoom: f32,
+    minimap_dragging: bool,
+}
+
+struct MinimapContext {
+    rect: Rectangle,
+    bounds: Rectangle,
+    scale: f32,
+    origin: Vector2,
 }
 
 impl AppState {
@@ -85,6 +100,7 @@ impl AppState {
             pan_anchor: Vector2::new(0.0, 0.0),
             pan_start: Vector2::new(0.0, 0.0),
             zoom: 1.0,
+            minimap_dragging: false,
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -268,7 +284,8 @@ impl AppState {
         backspace: bool,
         shift_down: bool,
         ctrl_down: bool,
-        sidebar_height: f32,
+        screen_w: f32,
+        screen_h: f32,
     ) {
         if ctrl_down && wheel.abs() > f32::EPSILON {
             let factor = 1.0 + wheel * 0.1;
@@ -280,6 +297,41 @@ impl AppState {
             mouse.x / self.zoom - self.pan.x,
             mouse.y / self.zoom - self.pan.y,
         );
+
+        let minimap_ctx = self.minimap_context(screen_w, screen_h);
+        if let Some(ctx) = minimap_ctx {
+            let buttons = self.minimap_buttons(&ctx);
+            if left_pressed {
+                if point_in_rect(mouse, buttons.0) {
+                    if let Some(win) = self.windows.last() {
+                        self.zoom_to_rect(win.rect_at(Vector2::new(0.0, 0.0)), screen_w, screen_h);
+                    }
+                    return;
+                }
+                if point_in_rect(mouse, buttons.1) {
+                    if let Some(bounds) = self.world_bounds() {
+                        self.zoom_to_rect(bounds, screen_w, screen_h);
+                    }
+                    return;
+                }
+                if point_in_rect(mouse, buttons.2) {
+                    self.zoom = 1.0;
+                    self.pan = Vector2::new(0.0, 0.0);
+                    return;
+                }
+                if point_in_rect(mouse, ctx.rect) {
+                    self.minimap_dragging = true;
+                    let target = self.minimap_to_world(mouse, &ctx);
+                    self.center_view_on(target, screen_w, screen_h);
+                    return;
+                }
+            }
+            if self.minimap_dragging && left_down {
+                let target = self.minimap_to_world(mouse, &ctx);
+                self.center_view_on(target, screen_w, screen_h);
+                return;
+            }
+        }
 
         if middle_pressed {
             self.pan_dragging = true;
@@ -306,16 +358,14 @@ impl AppState {
                 w.dragging_minimap = false;
                 w.hover_edges = None;
             }
+            self.minimap_dragging = false;
         }
 
         if wheel.abs() > f32::EPSILON {
-            if self.sidebar.handle_wheel(
-                mouse,
-                wheel,
-                &self.project,
-                &self.project.defs,
-                sidebar_height,
-            ) {
+            if self
+                .sidebar
+                .handle_wheel(mouse, wheel, &self.project, &self.project.defs, screen_h)
+            {
                 return;
             }
             for idx in (0..self.windows.len()).rev() {
@@ -574,6 +624,184 @@ impl AppState {
             .unwrap_or(0.0)
     }
 
+    fn world_bounds(&self) -> Option<Rectangle> {
+        if self.windows.is_empty() {
+            return None;
+        }
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        for w in &self.windows {
+            min_x = min_x.min(w.position.x);
+            min_y = min_y.min(w.position.y);
+            max_x = max_x.max(w.position.x + w.size.x);
+            max_y = max_y.max(w.position.y + w.size.y);
+        }
+        if min_x.is_infinite() || min_y.is_infinite() {
+            return None;
+        }
+        let padding = 24.0;
+        Some(Rectangle {
+            x: min_x - padding,
+            y: min_y - padding,
+            width: (max_x - min_x) + padding * 2.0,
+            height: (max_y - min_y) + padding * 2.0,
+        })
+    }
+
+    fn minimap_context(&self, screen_w: f32, _screen_h: f32) -> Option<MinimapContext> {
+        let bounds = self.world_bounds()?;
+        let rect = Rectangle {
+            x: (screen_w - MINIMAP_W - MINIMAP_MARGIN).max(0.0),
+            y: MINIMAP_MARGIN,
+            width: MINIMAP_W,
+            height: MINIMAP_H,
+        };
+        let avail_w = (rect.width - MINIMAP_PAD * 2.0).max(1.0);
+        let avail_h = (rect.height - MINIMAP_PAD * 2.0).max(1.0);
+        let scale = (avail_w / bounds.width)
+            .min(avail_h / bounds.height)
+            .max(0.01);
+        let origin = Vector2 {
+            x: rect.x + MINIMAP_PAD - bounds.x * scale,
+            y: rect.y + MINIMAP_PAD - bounds.y * scale,
+        };
+        Some(MinimapContext {
+            rect,
+            bounds,
+            scale,
+            origin,
+        })
+    }
+
+    fn minimap_buttons(&self, ctx: &MinimapContext) -> (Rectangle, Rectangle, Rectangle) {
+        let y = ctx.rect.y + ctx.rect.height - MINIMAP_BTN_H - MINIMAP_PAD;
+        let x0 = ctx.rect.x + MINIMAP_PAD;
+        let b0 = Rectangle {
+            x: x0,
+            y,
+            width: MINIMAP_BTN_W,
+            height: MINIMAP_BTN_H,
+        };
+        let b1 = Rectangle {
+            x: x0 + MINIMAP_BTN_W + MINIMAP_BTN_GAP,
+            y,
+            width: MINIMAP_BTN_W,
+            height: MINIMAP_BTN_H,
+        };
+        let b2 = Rectangle {
+            x: x0 + (MINIMAP_BTN_W + MINIMAP_BTN_GAP) * 2.0,
+            y,
+            width: MINIMAP_BTN_W,
+            height: MINIMAP_BTN_H,
+        };
+        (b0, b1, b2)
+    }
+
+    fn minimap_to_world(&self, mouse: Vector2, ctx: &MinimapContext) -> Vector2 {
+        Vector2 {
+            x: (mouse.x - ctx.origin.x) / ctx.scale,
+            y: (mouse.y - ctx.origin.y) / ctx.scale,
+        }
+    }
+
+    fn center_view_on(&mut self, world: Vector2, screen_w: f32, screen_h: f32) {
+        self.pan = Vector2::new(
+            screen_w / (2.0 * self.zoom) - world.x,
+            screen_h / (2.0 * self.zoom) - world.y,
+        );
+    }
+
+    fn zoom_to_rect(&mut self, rect: Rectangle, screen_w: f32, screen_h: f32) {
+        let target_zoom = (screen_w / rect.width).min(screen_h / rect.height) * 0.9;
+        self.zoom = target_zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        let center = Vector2::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+        self.center_view_on(center, screen_w, screen_h);
+    }
+
+    fn draw_minimap(&self, d: &mut RaylibDrawHandle, ctx: &MinimapContext) {
+        d.draw_rectangle(
+            ctx.rect.x as i32,
+            ctx.rect.y as i32,
+            ctx.rect.width as i32,
+            ctx.rect.height as i32,
+            self.palette.window,
+        );
+        d.draw_rectangle_lines(
+            ctx.rect.x as i32,
+            ctx.rect.y as i32,
+            ctx.rect.width as i32,
+            ctx.rect.height as i32,
+            self.palette.title,
+        );
+
+        for (idx, win) in self.windows.iter().enumerate() {
+            let x = ctx.origin.x + (win.position.x - ctx.bounds.x) * ctx.scale;
+            let y = ctx.origin.y + (win.position.y - ctx.bounds.y) * ctx.scale;
+            let w = win.size.x * ctx.scale;
+            let h = win.size.y * ctx.scale;
+            let rect = Rectangle {
+                x,
+                y,
+                width: w,
+                height: h,
+            };
+            let color = if idx + 1 == self.windows.len() {
+                self.palette.window_top
+            } else {
+                self.palette.window
+            };
+            d.draw_rectangle_rec(rect, color);
+            d.draw_rectangle_lines(
+                rect.x as i32,
+                rect.y as i32,
+                rect.width as i32,
+                rect.height as i32,
+                self.palette.sidebar_highlight,
+            );
+        }
+
+        let view_rect = Rectangle {
+            x: -self.pan.x,
+            y: -self.pan.y,
+            width: d.get_screen_width() as f32 / self.zoom,
+            height: d.get_screen_height() as f32 / self.zoom,
+        };
+        let vx = ctx.origin.x + (view_rect.x - ctx.bounds.x) * ctx.scale;
+        let vy = ctx.origin.y + (view_rect.y - ctx.bounds.y) * ctx.scale;
+        let vw = view_rect.width * ctx.scale;
+        let vh = view_rect.height * ctx.scale;
+        d.draw_rectangle_lines(
+            vx as i32,
+            vy as i32,
+            vw as i32,
+            vh as i32,
+            self.palette.close,
+        );
+
+        let buttons = self.minimap_buttons(ctx);
+        let labels = ["Current", "Fit All", "Reset"];
+        let btns = [buttons.0, buttons.1, buttons.2];
+        for (i, rect) in btns.iter().enumerate() {
+            d.draw_rectangle(
+                rect.x as i32,
+                rect.y as i32,
+                rect.width as i32,
+                rect.height as i32,
+                self.palette.title,
+            );
+            let text = labels[i];
+            d.draw_text(
+                text,
+                (rect.x + 6.0) as i32,
+                (rect.y + 3.0) as i32,
+                10,
+                self.palette.text,
+            );
+        }
+    }
+
     pub fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
         let mut hover_cursor: Option<MouseCursor> = None;
         d.clear_background(self.palette.bg);
@@ -603,6 +831,11 @@ impl AppState {
             }
         }
         d.set_mouse_cursor(hover_cursor.unwrap_or(MouseCursor::MOUSE_CURSOR_DEFAULT));
+        if let Some(ctx) =
+            self.minimap_context(d.get_screen_width() as f32, d.get_screen_height() as f32)
+        {
+            self.draw_minimap(d, &ctx);
+        }
         self.sidebar.draw(
             d,
             font,
@@ -743,7 +976,8 @@ impl AppState {
                     return WindowAction::None;
                 }
             }
-            if let Some(def) = code_window::hit_test_calls(font, pf, win, world_mouse, &self.project)
+            if let Some(def) =
+                code_window::hit_test_calls(font, pf, win, world_mouse, &self.project)
             {
                 return WindowAction::OpenDefinition(def);
             }

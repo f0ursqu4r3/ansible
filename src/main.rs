@@ -100,6 +100,7 @@ fn main() -> Result<()> {
             backspace,
             shift_down,
             ctrl_down,
+            rl.get_screen_width() as f32,
             rl.get_screen_height() as f32,
         );
 
