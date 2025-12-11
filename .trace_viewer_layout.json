@@ -25,29 +25,6 @@
     },
     {
       "file": "src/main.rs",
-      "view_kind": {
-        "type": "SingleFn",
-        "start": 165,
-        "end": 193,
-        "title": "load_monospace_font"
-      },
-      "position": [
-        1231.8086,
-        520.2539
-      ],
-      "size": [
-        720.0,
-        460.0
-      ],
-      "scroll": 0.0,
-      "scroll_x": 0.0,
-      "link_from": {
-        "file": "src/main.rs",
-        "line": 83
-      }
-    },
-    {
-      "file": "src/main.rs",
       "view_kind": null,
       "position": [
         285.3125,
@@ -60,6 +37,29 @@
       "scroll": 227.71645,
       "scroll_x": 0.0,
       "link_from": null
+    },
+    {
+      "file": "src/main.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 165,
+        "end": 193,
+        "title": "load_monospace_font"
+      },
+      "position": [
+        1268.6133,
+        534.47266
+      ],
+      "size": [
+        720.0,
+        460.0
+      ],
+      "scroll": 0.0,
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src/main.rs",
+        "line": 83
+      }
     }
   ],
   "sidebar_scroll": 0.0,

@@ -297,17 +297,27 @@ impl AppState {
                                 ((mouse.x - track_x - w.drag_start.x) / denom).clamp(0.0, 1.0);
                             w.scroll_x = (ratio * scroll_range).clamp(0.0, scroll_range);
                         }
-                    }
                 }
+            }
                 if w.dragging_minimap {
                     if let Some(metrics) = code_window::metrics_for(&self.project, w) {
                         if let Some(mini) = w.minimap_rect_at(&metrics, self.pan) {
-                            let ratio = ((mouse.y - mini.y) / mini.height).clamp(0.0, 1.0);
-                            let scroll_range = metrics.max_scroll_y();
+                            let content_height = metrics.total_height;
+                            let visible_height = metrics.avail_height;
+                            let view_h = (visible_height * (mini.height / content_height.max(1.0)))
+                                .clamp(4.0, mini.height);
+                            let travel_height =
+                                (content_height.min(mini.height) - view_h).max(0.0);
+                            let ratio = if travel_height > 0.0 {
+                                ((mouse.y - mini.y - view_h * 0.5) / travel_height).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            let scroll_range = metrics.max_scroll_y().max(1.0);
                             w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
-                        }
                     }
                 }
+            }
                 if !w.is_resizing {
                     w.hover_edges = w.hit_resize_edges(world_mouse, Vector2::new(0.0, 0.0));
                 }

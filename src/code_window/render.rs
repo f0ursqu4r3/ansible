@@ -257,7 +257,8 @@ fn draw_code(
 
         let scroll_range = metrics.max_scroll_y().max(1.0);
         let ratio = (win.scroll / scroll_range).clamp(0.0, 1.0);
-        let view_y = mini.y + ratio * (mini.height - view_h);
+        let travel_height = (content_height.min(mini.height) - view_h).max(0.0);
+        let view_y = mini.y + ratio * travel_height;
         d.draw_rectangle(
             mini.x as i32,
             view_y as i32,
