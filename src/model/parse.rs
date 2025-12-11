@@ -29,13 +29,15 @@ pub(crate) fn parse_tree_sitter(
                 Some(t) => t,
                 None => continue,
             };
-            let kind = def_kind(cap.node);
-            let pos = cap.node.start_position();
+            let (node, kind) = def_node_and_kind(cap.node);
+            let start = node.start_position();
+            let end = node.end_position();
             defs.push(FunctionDef {
                 name: text.to_string(),
                 module_path: module_for_path(path),
-                line: pos.row,
-                col: pos.column,
+                line: start.row,
+                end_line: end.row,
+                col: start.column,
                 kind,
             });
         }
@@ -64,7 +66,7 @@ pub(crate) fn parse_tree_sitter(
     Ok((ParsedComponents { defs, calls }, tree))
 }
 
-fn def_kind(node: Node) -> String {
+fn def_node_and_kind(node: Node) -> (Node, String) {
     let mut n = node;
     for _ in 0..4 {
         let k = n.kind().to_string();
@@ -77,7 +79,7 @@ fn def_kind(node: Node) -> String {
                 | "type_item"
                 | "impl_item"
         ) {
-            return k;
+            return (n, k);
         }
         if let Some(p) = n.parent() {
             n = p;
@@ -85,7 +87,8 @@ fn def_kind(node: Node) -> String {
             break;
         }
     }
-    n.kind().to_string()
+    let kind = n.kind().to_string();
+    (n, kind)
 }
 
 fn node_text<'a>(node: Node<'a>, source: &'a str) -> Option<&'a str> {
@@ -112,6 +115,7 @@ pub fn find_function_span(pf: &ParsedFile, line: usize) -> Option<(usize, usize)
         .position(|d| d.line == line)
         .or_else(|| defs.iter().rposition(|d| d.line <= line))?;
     let target = defs[idx];
+    let last_line = pf.lines.len().saturating_sub(1);
 
     let type_kinds = [
         "struct_item",
@@ -122,36 +126,54 @@ pub fn find_function_span(pf: &ParsedFile, line: usize) -> Option<(usize, usize)
     ];
     let is_type = type_kinds.contains(&target.kind.as_str());
 
-    if is_type {
-        let start_idx = defs
-            .iter()
-            .position(|d| d.name == target.name && type_kinds.contains(&d.kind.as_str()))
-            .unwrap_or(idx);
-        let start = defs[start_idx].line;
+    let mut start = target.line.min(last_line);
+    let mut end = target.end_line.min(last_line);
 
-        let end = defs
-            .iter()
-            .skip(idx + 1)
-            .find(|d| {
-                if d.name == target.name {
-                    return false;
-                }
-                if type_kinds.contains(&d.kind.as_str()) {
-                    return true;
-                }
-                d.kind != "impl_item"
-            })
-            .map(|d| d.line.saturating_sub(1))
-            .unwrap_or_else(|| pf.lines.len().saturating_sub(1));
-        return Some((start, end.min(pf.lines.len().saturating_sub(1))));
+    if is_type {
+        for d in defs.iter().skip(idx + 1) {
+            if type_kinds.contains(&d.kind.as_str()) && d.name != target.name {
+                break;
+            }
+            if d.kind == "impl_item" && d.name == target.name {
+                end = end.max(d.end_line.min(last_line));
+            }
+        }
     }
 
-    let start = target.line;
-    let end = defs
-        .iter()
-        .skip(idx + 1)
-        .find(|d| d.line > start)
-        .map(|d| d.line.saturating_sub(1))
-        .unwrap_or_else(|| pf.lines.len().saturating_sub(1));
-    Some((start, end.min(pf.lines.len().saturating_sub(1))))
+    start = extend_span_upwards(&pf.lines, start);
+    if end < start {
+        end = start;
+    }
+
+    Some((start, end))
+}
+
+fn extend_span_upwards(lines: &[String], start: usize) -> usize {
+    if start == 0 || lines.is_empty() {
+        return start;
+    }
+    let mut idx = start;
+    while idx > 0 {
+        let prev = lines[idx - 1].trim_start();
+        if prev.starts_with("#[") || prev.starts_with("///") || prev.starts_with("//!") {
+            idx -= 1;
+            continue;
+        }
+        if prev.contains("*/") {
+            idx -= 1;
+            while idx > 0 {
+                let line = &lines[idx - 1];
+                idx -= 1;
+                if line.contains("/*") {
+                    break;
+                }
+            }
+            continue;
+        }
+        if prev.is_empty() {
+            break;
+        }
+        break;
+    }
+    idx
 }

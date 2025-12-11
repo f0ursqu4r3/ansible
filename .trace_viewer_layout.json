@@ -11,9 +11,32 @@
         738.97656,
         1276.1211
       ],
-      "scroll": 691.20026,
+      "scroll": 883.2004,
       "scroll_x": 0.0,
       "link_from": null
+    },
+    {
+      "file": "src\\main.rs",
+      "view_kind": {
+        "type": "SingleFn",
+        "start": 169,
+        "end": 196,
+        "title": "load_monospace_font"
+      },
+      "position": [
+        1122.0,
+        193.0
+      ],
+      "size": [
+        720.0,
+        668.0
+      ],
+      "scroll": 0.0,
+      "scroll_x": 0.0,
+      "link_from": {
+        "file": "src\\main.rs",
+        "line": 83
+      }
     }
   ],
   "sidebar_scroll": 0.0,

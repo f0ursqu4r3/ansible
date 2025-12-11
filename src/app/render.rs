@@ -99,6 +99,7 @@ impl AppState {
         world_mouse: Vector2,
     ) {
         self.call_links.clear();
+        let mut distances = Vec::new();
         let mut fn_windows = Vec::new();
         for (idx, win) in self.windows.iter().enumerate() {
             if let CodeViewKind::SingleFn { start, .. } = win.view_kind {
@@ -173,19 +174,32 @@ impl AppState {
                 let c1 = Vector2::new(start_pt.x + dir * handle, start_pt.y);
                 let c2 = Vector2::new(end_pt.x - dir * handle, end_pt.y);
                 let points = [start_pt, c1, c2, end_pt];
-                let hovered = min_distance_to_cubic(&points, world_mouse) <= 10.0;
+                let dist = min_distance_to_cubic(&points, world_mouse);
                 self.call_links.push(super::types::CallLink {
                     points,
                     caller_idx,
                     line,
-                    hovered,
+                    hovered: false,
                     target_idx: fn_idx,
                 });
+                distances.push(dist);
                 if let Some(rect) = caller_win.call_highlight_rect(caller_pf, line, true) {
                     highlights.push((rect, caller_idx));
                 }
             }
         }
+
+        if let Some((idx, _)) = distances
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| **d <= 10.0)
+            .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        {
+            if let Some(link) = self.call_links.get_mut(idx) {
+                link.hovered = true;
+            }
+        }
+
         let active_idx = self.windows.len().saturating_sub(1);
         let active_is_fn = self
             .windows

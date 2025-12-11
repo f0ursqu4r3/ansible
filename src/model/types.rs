@@ -5,6 +5,7 @@ pub struct FunctionDef {
     pub name: String,
     pub module_path: String,
     pub line: usize,
+    pub end_line: usize,
     pub col: usize,
     pub kind: String,
 }
