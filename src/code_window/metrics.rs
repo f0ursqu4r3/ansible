@@ -1,5 +1,6 @@
 use crate::constants::{BREADCRUMB_HEIGHT, CODE_X_OFFSET, LINE_HEIGHT, TITLE_BAR_HEIGHT};
 use crate::model::{ParsedFile, ProjectModel};
+use raylib::prelude::Rectangle;
 
 use super::types::{
     CodeWindow, ContentMetrics, CONTENT_PADDING, RIGHT_TEXT_PAD, SCROLLBAR_PADDING,
@@ -67,5 +68,41 @@ pub fn clamp_window_scroll(project: &ProjectModel, win: &mut CodeWindow) {
     if let Some(metrics) = metrics_for(project, win) {
         win.scroll = win.scroll.clamp(0.0, metrics.max_scroll_y());
         win.scroll_x = win.scroll_x.clamp(0.0, metrics.max_scroll_x());
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MinimapGeometry {
+    pub line_step: f32,
+    pub scale: f32,
+    pub view_h: f32,
+    pub view_y: f32,
+    pub max_view_y: f32,
+    pub content_top: f32,
+}
+
+pub fn minimap_geometry(
+    win: &CodeWindow,
+    metrics: &ContentMetrics,
+    mini: Rectangle,
+) -> MinimapGeometry {
+    let raw_scale = (mini.height / metrics.total_height.max(1.0)).max(0.001);
+    let line_step = (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
+    let scale = line_step / LINE_HEIGHT;
+    let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
+
+    let scroll_scaled = win.scroll * scale;
+    let unclamped_view_y = mini.y + scroll_scaled;
+    let max_view_y = (mini.y + mini.height - view_h).max(mini.y);
+    let view_y = unclamped_view_y.clamp(mini.y, max_view_y);
+    let content_top = view_y - scroll_scaled;
+
+    MinimapGeometry {
+        line_step,
+        scale,
+        view_h,
+        view_y,
+        max_view_y,
+        content_top,
     }
 }

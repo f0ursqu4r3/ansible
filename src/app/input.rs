@@ -6,6 +6,7 @@ use raylib::prelude::*;
 use crate::code_window;
 use crate::code_window::{
     CallOrigin, CodeViewKind, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING, SCROLLBAR_THICKNESS,
+    minimap_geometry,
 };
 use crate::constants::{CODE_X_OFFSET, LINE_HEIGHT, SIDEBAR_WIDTH};
 use crate::{AppFont, point_in_rect};
@@ -313,33 +314,13 @@ impl AppState {
                 }
                 if w.dragging_minimap {
                     if let Some(metrics) = code_window::metrics_for(&self.project, w) {
-                        if let Some(pf) = self.project.parsed.get(&w.file) {
-                            if let Some(mini) = w.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0))
-                            {
-                                let (_, view_lines) = w.view_lines(pf);
-                                let raw_scale =
-                                    (mini.height / metrics.total_height.max(1.0)).max(0.001);
-                                let line_step = (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
-                                let scale = line_step / LINE_HEIGHT;
-                                let content_height = view_lines.len() as f32 * line_step;
-                                let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
-                                let travel_height = (mini.height - view_h).max(0.0);
-                                let content_max_y =
-                                    mini.y + content_height.min(mini.height) - view_h;
-                                let view_y = (world_mouse.y - w.drag_start.y)
-                                    .clamp(mini.y, content_max_y);
-                                let ratio = if travel_height > 0.0 {
-                                    if view_y >= content_max_y - f32::EPSILON {
-                                        1.0
-                                    } else {
-                                        ((view_y - mini.y) / travel_height).clamp(0.0, 1.0)
-                                    }
-                                } else {
-                                    0.0
-                                };
-                                let scroll_range = metrics.max_scroll_y().max(0.0);
-                                w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
-                            }
+                        if let Some(mini) = w.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0)) {
+                            let geo = minimap_geometry(w, &metrics, mini);
+                            let view_y = (world_mouse.y - w.drag_start.y)
+                                .clamp(mini.y, geo.max_view_y);
+                            let scroll_range = metrics.max_scroll_y().max(0.0);
+                            let scroll = ((view_y - mini.y) / geo.scale).clamp(0.0, scroll_range);
+                            w.scroll = scroll;
                         }
                     }
                 }
@@ -413,41 +394,16 @@ impl AppState {
                                 win.drag_start.y = grab_offset;
                                 if let Some(metrics) = code_window::metrics_for(&self.project, win)
                                 {
-                                    if let Some(pf) = self.project.parsed.get(&win.file) {
-                                        if let Some(mini) =
-                                            win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0))
+                                    if let Some(mini) =
+                                        win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0))
                                     {
-                                            let (_, view_lines) = win.view_lines(pf);
-                                            let raw_scale = (mini.height
-                                                / metrics.total_height.max(1.0))
-                                            .max(0.001);
-                                            let line_step =
-                                                (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
-                                            let scale = line_step / LINE_HEIGHT;
-                                            let content_height =
-                                                view_lines.len() as f32 * line_step;
-                                            let view_h = (metrics.avail_height * scale)
-                                                .clamp(4.0, mini.height);
-                                            let travel_height = (mini.height - view_h).max(0.0);
-                                            let content_max_y = mini.y
-                                                + content_height.min(mini.height)
-                                                - view_h;
-                                            let view_y = (world_mouse.y - grab_offset)
-                                                .clamp(mini.y, content_max_y);
-                                            let ratio = if travel_height > 0.0 {
-                                                if view_y >= content_max_y - f32::EPSILON {
-                                                    1.0
-                                                } else {
-                                                    ((view_y - mini.y) / travel_height)
-                                                        .clamp(0.0, 1.0)
-                                                }
-                                            } else {
-                                                0.0
-                                            };
-                                            let scroll_range = metrics.max_scroll_y().max(0.0);
-                                            win.scroll =
-                                                (ratio * scroll_range).clamp(0.0, scroll_range);
-                                        }
+                                        let geo = minimap_geometry(win, &metrics, mini);
+                                        let view_y = (world_mouse.y - grab_offset)
+                                            .clamp(mini.y, geo.max_view_y);
+                                        let scroll_range = metrics.max_scroll_y().max(0.0);
+                                        let scroll =
+                                            ((view_y - mini.y) / geo.scale).clamp(0.0, scroll_range);
+                                        win.scroll = scroll;
                                     }
                                 }
                                 win.dragging_vscroll = false;
@@ -562,21 +518,9 @@ impl AppState {
             let metrics = code_window::content_metrics(pf, win);
             if let Some(mini) = win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0)) {
                 if point_in_rect(world_mouse, mini) {
-                    let (_, view_lines) = win.view_lines(pf);
-                    let raw_scale = (mini.height / metrics.total_height.max(1.0)).max(0.001);
-                    let line_step = (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
-                    let scale = line_step / LINE_HEIGHT;
-                    let content_height = view_lines.len() as f32 * line_step;
-                    let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
-                    let content_travel = (content_height.min(mini.height) - view_h).max(0.0);
-                    let travel_height = (mini.height - view_h).max(0.0);
-                    let scroll_range = metrics.max_scroll_y().max(0.0);
-                    let ratio = if scroll_range > 0.0 {
-                        (win.scroll / scroll_range).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    let view_y = (mini.y + ratio * travel_height).min(mini.y + content_travel);
+                    let geo = minimap_geometry(win, &metrics, mini);
+                    let view_y = geo.view_y;
+                    let view_h = geo.view_h;
                     let grab_offset = if world_mouse.y >= view_y && world_mouse.y <= view_y + view_h
                     {
                         (world_mouse.y - view_y).clamp(0.0, view_h)

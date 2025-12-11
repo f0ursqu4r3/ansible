@@ -260,10 +260,19 @@ impl AppState {
     }
 
     pub(crate) fn minimap_to_world(&self, mouse: Vector2, ctx: &MinimapContext) -> Vector2 {
-        Vector2 {
-            x: (mouse.x - ctx.origin.x) / ctx.scale,
-            y: (mouse.y - ctx.origin.y) / ctx.scale,
-        }
+        let mut world = Vector2 {
+            x: (mouse.x - ctx.origin.x) / ctx.scale + ctx.bounds.x,
+            y: (mouse.y - ctx.origin.y) / ctx.scale + ctx.bounds.y,
+        };
+        // Keep the target inside the minimap bounds so dragging near the edge
+        // doesn't jump the camera past the content.
+        world.x = world
+            .x
+            .clamp(ctx.bounds.x, ctx.bounds.x + ctx.bounds.width);
+        world.y = world
+            .y
+            .clamp(ctx.bounds.y, ctx.bounds.y + ctx.bounds.height);
+        world
     }
 
     pub(crate) fn center_view_on(&mut self, world: Vector2, screen_w: f32, screen_h: f32) {
