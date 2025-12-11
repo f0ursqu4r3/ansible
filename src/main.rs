@@ -97,7 +97,10 @@ fn main() -> Result<()> {
             || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
         let ctrl_down = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
             || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
+        let meta_down = rl.is_key_down(KeyboardKey::KEY_LEFT_SUPER)
+            || rl.is_key_down(KeyboardKey::KEY_RIGHT_SUPER);
         let space_down = rl.is_key_down(KeyboardKey::KEY_SPACE);
+        let meta_close_pressed = meta_down && rl.is_key_pressed(KeyboardKey::KEY_W);
 
         let typed = collect_typed_chars(&mut rl);
         let backspace = rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE);
@@ -116,6 +119,7 @@ fn main() -> Result<()> {
             space_down,
             rl.get_screen_width() as f32,
             rl.get_screen_height() as f32,
+            meta_close_pressed,
         );
 
         let mut d = rl.begin_drawing(&thread);

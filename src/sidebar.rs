@@ -393,7 +393,7 @@ impl SidebarState {
                 }
                 let icon = if entry.is_dir {
                     if self.is_collapsed(&entry.path) {
-                        Icon::Folder
+                        Icon::FolderClosed
                     } else {
                         Icon::FolderOpen
                     }

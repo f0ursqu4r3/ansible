@@ -197,11 +197,11 @@ fn draw_code(
             palette.window,
         );
         let raw_scale = mini.height / metrics.total_height.max(1.0);
-        let line_step = (raw_scale * LINE_HEIGHT).clamp(1.0, 2.0);
+        let raw_scale = raw_scale.max(0.001);
+        let line_step = (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
         let scale = line_step / LINE_HEIGHT;
         let block_height = line_step;
         let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
-        let max_width = (mini.width - 4.0).max(1.0);
         let mini_scissor = world_to_screen_rect(mini, pan, zoom);
         let mut scoped = d.begin_scissor_mode(
             mini_scissor.x as i32,
@@ -232,22 +232,29 @@ fn draw_code(
             let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
             let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
             let mut x = mini.x + 2.0;
+            let char_w = (2.0 * scale).max(1.0);
             for (text, color) in segments {
-                let width = font
-                    .measure_width(&text, FONT_SIZE, 0.0)
-                    .max(text.len() as f32 * 4.0);
-                let w = (width / metrics.max_width.max(1.0)) * max_width;
-                if w <= 0.5 {
-                    continue;
+                for ch in text.chars() {
+                    if ch.is_whitespace() {
+                        x += char_w;
+                        continue;
+                    }
+                    let h = if ch.is_uppercase() { 2.0 } else { 1.0 };
+                    let y = line_y + ((block_height - h).max(0.0) * 0.5);
+                    scoped.draw_rectangle_rec(
+                        Rectangle {
+                            x,
+                            y,
+                            width: char_w,
+                            height: h,
+                        },
+                        color,
+                    );
+                    x += char_w;
+                    if x > mini.x + mini.width - 2.0 {
+                        break;
+                    }
                 }
-                scoped.draw_rectangle(
-                    x as i32,
-                    line_y as i32,
-                    w as i32,
-                    block_height as i32,
-                    color,
-                );
-                x += w;
                 if x > mini.x + mini.width - 2.0 {
                     break;
                 }
@@ -257,8 +264,9 @@ fn draw_code(
 
         let scroll_range = metrics.max_scroll_y().max(1.0);
         let ratio = (win.scroll / scroll_range).clamp(0.0, 1.0);
-        let travel_height = (content_height.min(mini.height) - view_h).max(0.0);
-        let view_y = mini.y + ratio * travel_height;
+        let travel_height = (mini.height - view_h).max(0.0);
+        let content_max_y = mini.y + content_height.min(mini.height) - view_h;
+        let view_y = (mini.y + ratio * travel_height).min(content_max_y);
         d.draw_rectangle(
             mini.x as i32,
             view_y as i32,

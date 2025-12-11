@@ -2,29 +2,6 @@
   "windows": [
     {
       "file": "src/main.rs",
-      "view_kind": {
-        "type": "SingleFn",
-        "start": 32,
-        "end": 47,
-        "title": "draw_text_ex"
-      },
-      "position": [
-        1191.6797,
-        90.57422
-      ],
-      "size": [
-        720.0,
-        393.36328
-      ],
-      "scroll": 0.0,
-      "scroll_x": 0.0,
-      "link_from": {
-        "file": "src/main.rs",
-        "line": 43
-      }
-    },
-    {
-      "file": "src/main.rs",
       "view_kind": null,
       "position": [
         285.3125,
@@ -34,32 +11,9 @@
         738.97656,
         1276.1211
       ],
-      "scroll": 227.71645,
-      "scroll_x": 0.0,
-      "link_from": null
-    },
-    {
-      "file": "src/main.rs",
-      "view_kind": {
-        "type": "SingleFn",
-        "start": 165,
-        "end": 193,
-        "title": "load_monospace_font"
-      },
-      "position": [
-        1268.6133,
-        534.47266
-      ],
-      "size": [
-        720.0,
-        460.0
-      ],
       "scroll": 0.0,
       "scroll_x": 0.0,
-      "link_from": {
-        "file": "src/main.rs",
-        "line": 83
-      }
+      "link_from": null
     }
   ],
   "sidebar_scroll": 0.0,

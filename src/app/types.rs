@@ -91,6 +91,6 @@ pub enum WindowAction {
         ratio: f32,
     },
     StartMinimap {
-        ratio: f32,
+        grab_offset: f32,
     },
 }

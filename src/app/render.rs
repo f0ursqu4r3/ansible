@@ -267,8 +267,12 @@ impl AppState {
     }
 
     pub(crate) fn center_view_on(&mut self, world: Vector2, screen_w: f32, screen_h: f32) {
+        // Center relative to the visible canvas (sidebar area is occluded).
+        let canvas_w = (screen_w - SIDEBAR_WIDTH).max(0.0);
+        let half_canvas = canvas_w * 0.5 / self.zoom;
+        let sidebar_offset = SIDEBAR_WIDTH / self.zoom;
         self.pan = Vector2::new(
-            screen_w / (2.0 * self.zoom) - world.x,
+            sidebar_offset + half_canvas - world.x,
             screen_h / (2.0 * self.zoom) - world.y,
         );
     }

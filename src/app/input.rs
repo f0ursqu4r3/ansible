@@ -10,11 +10,9 @@ use crate::code_window::{
 use crate::constants::{CODE_X_OFFSET, LINE_HEIGHT, SIDEBAR_WIDTH};
 use crate::{AppFont, point_in_rect};
 
-use super::types::{
-    WindowAction, MIN_ZOOM, MAX_ZOOM,
-};
-use super::util::min_distance_to_cubic;
 use super::AppState;
+use super::types::{MAX_ZOOM, MIN_ZOOM, WindowAction};
+use super::util::min_distance_to_cubic;
 
 impl AppState {
     pub fn handle_input(
@@ -33,10 +31,18 @@ impl AppState {
         space_down: bool,
         screen_w: f32,
         screen_h: f32,
+        meta_close_pressed: bool,
     ) {
-        let mut world_mouse =
-            Vector2::new(mouse.x / self.zoom - self.pan.x, mouse.y / self.zoom - self.pan.y);
+        let mut world_mouse = Vector2::new(
+            mouse.x / self.zoom - self.pan.x,
+            mouse.y / self.zoom - self.pan.y,
+        );
         self.last_mouse_world = Some(world_mouse);
+
+        if meta_close_pressed {
+            self.windows.pop();
+            return;
+        }
 
         let mut double_open: Option<(PathBuf, usize, Option<CallOrigin>)> = None;
         if left_pressed {
@@ -92,8 +98,10 @@ impl AppState {
                     (mouse.x - SIDEBAR_WIDTH) / self.zoom - world_anchor.x,
                     mouse.y / self.zoom - world_anchor.y,
                 );
-                world_mouse =
-                    Vector2::new(mouse.x / self.zoom - self.pan.x, mouse.y / self.zoom - self.pan.y);
+                world_mouse = Vector2::new(
+                    mouse.x / self.zoom - self.pan.x,
+                    mouse.y / self.zoom - self.pan.y,
+                );
                 self.last_mouse_world = Some(world_mouse);
             }
             return;
@@ -118,8 +126,8 @@ impl AppState {
                                 let max_scroll = code_window::metrics_for(&self.project, win)
                                     .map(|m| m.max_scroll_y())
                                     .unwrap_or(0.0);
-                                win.scroll = (local_line as f32 * LINE_HEIGHT - 40.0)
-                                    .clamp(0.0, max_scroll);
+                                win.scroll =
+                                    (local_line as f32 * LINE_HEIGHT - 40.0).clamp(0.0, max_scroll);
                                 win.focus_line = Some(line);
                                 scrolled = true;
                             }
@@ -243,20 +251,22 @@ impl AppState {
                     let dx = world_mouse.x - w.drag_start.x;
                     let dy = world_mouse.y - w.drag_start.y;
                     if left {
-                        let max_x = w.resize_origin_pos.x + w.resize_origin_size.x - code_window::MIN_WINDOW_W;
+                        let max_x = w.resize_origin_pos.x + w.resize_origin_size.x
+                            - code_window::MIN_WINDOW_W;
                         let nx = (w.resize_origin_pos.x + dx).min(max_x);
-                        new_size.x =
-                            (w.resize_origin_pos.x + w.resize_origin_size.x - nx).max(code_window::MIN_WINDOW_W);
+                        new_size.x = (w.resize_origin_pos.x + w.resize_origin_size.x - nx)
+                            .max(code_window::MIN_WINDOW_W);
                         new_pos.x = nx;
                     }
                     if right {
                         new_size.x = (w.resize_origin_size.x + dx).max(code_window::MIN_WINDOW_W);
                     }
                     if top {
-                        let max_y = w.resize_origin_pos.y + w.resize_origin_size.y - code_window::MIN_WINDOW_H;
+                        let max_y = w.resize_origin_pos.y + w.resize_origin_size.y
+                            - code_window::MIN_WINDOW_H;
                         let ny = (w.resize_origin_pos.y + dy).min(max_y);
-                        new_size.y =
-                            (w.resize_origin_pos.y + w.resize_origin_size.y - ny).max(code_window::MIN_WINDOW_H);
+                        new_size.y = (w.resize_origin_pos.y + w.resize_origin_size.y - ny)
+                            .max(code_window::MIN_WINDOW_H);
                         new_pos.y = ny;
                     }
                     if bottom {
@@ -268,8 +278,10 @@ impl AppState {
                 }
                 if w.dragging_vscroll {
                     if let Some(metrics) = code_window::metrics_for(&self.project, w) {
-                        let track_y =
-                            w.position.y + self.pan.y + crate::constants::TITLE_BAR_HEIGHT + crate::constants::BREADCRUMB_HEIGHT;
+                        let track_y = w.position.y
+                            + self.pan.y
+                            + crate::constants::TITLE_BAR_HEIGHT
+                            + crate::constants::BREADCRUMB_HEIGHT;
                         let track_h = metrics.avail_height;
                         if track_h > 0.0 {
                             let thumb_h = (metrics.avail_height / metrics.total_height.max(1.0)
@@ -297,27 +309,40 @@ impl AppState {
                                 ((mouse.x - track_x - w.drag_start.x) / denom).clamp(0.0, 1.0);
                             w.scroll_x = (ratio * scroll_range).clamp(0.0, scroll_range);
                         }
-                }
-            }
-                if w.dragging_minimap {
-                    if let Some(metrics) = code_window::metrics_for(&self.project, w) {
-                        if let Some(mini) = w.minimap_rect_at(&metrics, self.pan) {
-                            let content_height = metrics.total_height;
-                            let visible_height = metrics.avail_height;
-                            let view_h = (visible_height * (mini.height / content_height.max(1.0)))
-                                .clamp(4.0, mini.height);
-                            let travel_height =
-                                (content_height.min(mini.height) - view_h).max(0.0);
-                            let ratio = if travel_height > 0.0 {
-                                ((mouse.y - mini.y - view_h * 0.5) / travel_height).clamp(0.0, 1.0)
-                            } else {
-                                0.0
-                            };
-                            let scroll_range = metrics.max_scroll_y().max(1.0);
-                            w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
                     }
                 }
-            }
+                if w.dragging_minimap {
+                    if let Some(metrics) = code_window::metrics_for(&self.project, w) {
+                        if let Some(pf) = self.project.parsed.get(&w.file) {
+                            if let Some(mini) = w.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0))
+                            {
+                                let (_, view_lines) = w.view_lines(pf);
+                                let raw_scale =
+                                    (mini.height / metrics.total_height.max(1.0)).max(0.001);
+                                let line_step = (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
+                                let scale = line_step / LINE_HEIGHT;
+                                let content_height = view_lines.len() as f32 * line_step;
+                                let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
+                                let travel_height = (mini.height - view_h).max(0.0);
+                                let content_max_y =
+                                    mini.y + content_height.min(mini.height) - view_h;
+                                let view_y = (world_mouse.y - w.drag_start.y)
+                                    .clamp(mini.y, content_max_y);
+                                let ratio = if travel_height > 0.0 {
+                                    if view_y >= content_max_y - f32::EPSILON {
+                                        1.0
+                                    } else {
+                                        ((view_y - mini.y) / travel_height).clamp(0.0, 1.0)
+                                    }
+                                } else {
+                                    0.0
+                                };
+                                let scroll_range = metrics.max_scroll_y().max(0.0);
+                                w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
+                            }
+                        }
+                    }
+                }
                 if !w.is_resizing {
                     w.hover_edges = w.hit_resize_edges(world_mouse, Vector2::new(0.0, 0.0));
                 }
@@ -382,14 +407,48 @@ impl AppState {
                                 win.dragging_minimap = false;
                             }
                         }
-                        WindowAction::StartMinimap { ratio } => {
+                        WindowAction::StartMinimap { grab_offset } => {
                             if let Some(win) = self.windows.last_mut() {
                                 win.dragging_minimap = true;
-                                win.drag_start.y = ratio;
+                                win.drag_start.y = grab_offset;
                                 if let Some(metrics) = code_window::metrics_for(&self.project, win)
                                 {
-                                    let scroll_range = metrics.max_scroll_y();
-                                    win.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
+                                    if let Some(pf) = self.project.parsed.get(&win.file) {
+                                        if let Some(mini) =
+                                            win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0))
+                                    {
+                                            let (_, view_lines) = win.view_lines(pf);
+                                            let raw_scale = (mini.height
+                                                / metrics.total_height.max(1.0))
+                                            .max(0.001);
+                                            let line_step =
+                                                (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
+                                            let scale = line_step / LINE_HEIGHT;
+                                            let content_height =
+                                                view_lines.len() as f32 * line_step;
+                                            let view_h = (metrics.avail_height * scale)
+                                                .clamp(4.0, mini.height);
+                                            let travel_height = (mini.height - view_h).max(0.0);
+                                            let content_max_y = mini.y
+                                                + content_height.min(mini.height)
+                                                - view_h;
+                                            let view_y = (world_mouse.y - grab_offset)
+                                                .clamp(mini.y, content_max_y);
+                                            let ratio = if travel_height > 0.0 {
+                                                if view_y >= content_max_y - f32::EPSILON {
+                                                    1.0
+                                                } else {
+                                                    ((view_y - mini.y) / travel_height)
+                                                        .clamp(0.0, 1.0)
+                                                }
+                                            } else {
+                                                0.0
+                                            };
+                                            let scroll_range = metrics.max_scroll_y().max(0.0);
+                                            win.scroll =
+                                                (ratio * scroll_range).clamp(0.0, scroll_range);
+                                        }
+                                    }
                                 }
                                 win.dragging_vscroll = false;
                                 win.dragging_hscroll = false;
@@ -503,8 +562,28 @@ impl AppState {
             let metrics = code_window::content_metrics(pf, win);
             if let Some(mini) = win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0)) {
                 if point_in_rect(world_mouse, mini) {
-                    let ratio = ((world_mouse.y - mini.y) / mini.height).clamp(0.0, 1.0);
-                    return WindowAction::StartMinimap { ratio };
+                    let (_, view_lines) = win.view_lines(pf);
+                    let raw_scale = (mini.height / metrics.total_height.max(1.0)).max(0.001);
+                    let line_step = (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
+                    let scale = line_step / LINE_HEIGHT;
+                    let content_height = view_lines.len() as f32 * line_step;
+                    let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
+                    let content_travel = (content_height.min(mini.height) - view_h).max(0.0);
+                    let travel_height = (mini.height - view_h).max(0.0);
+                    let scroll_range = metrics.max_scroll_y().max(0.0);
+                    let ratio = if scroll_range > 0.0 {
+                        (win.scroll / scroll_range).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let view_y = (mini.y + ratio * travel_height).min(mini.y + content_travel);
+                    let grab_offset = if world_mouse.y >= view_y && world_mouse.y <= view_y + view_h
+                    {
+                        (world_mouse.y - view_y).clamp(0.0, view_h)
+                    } else {
+                        view_h * 0.5
+                    };
+                    return WindowAction::StartMinimap { grab_offset };
                 }
             }
             if metrics.show_v {
@@ -614,11 +693,7 @@ impl AppState {
             .enumerate()
             .filter_map(|(i, link)| {
                 let dist = min_distance_to_cubic(&link.points, world_mouse);
-                if dist <= tolerance {
-                    Some(i)
-                } else {
-                    None
-                }
+                if dist <= tolerance { Some(i) } else { None }
             })
             .collect();
         if hits.is_empty() {

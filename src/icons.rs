@@ -9,11 +9,22 @@ use resvg::{
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]
 pub enum Icon {
-    Folder,
-    FolderOpen,
-    File,
-    ChevronRight,
+    ArrowUp,
     ChevronDown,
+    ChevronRight,
+    File,
+    FolderClosed,
+    FolderOpen,
+    Folder,
+    HandGrab,
+    Hand,
+    MousePointer,
+    MoveDiagonalNesw,
+    MoveDiagonalNwse,
+    MoveHorizontal,
+    MoveVertical,
+    Move,
+    Pointer,
     Close,
 }
 pub struct Icons {
@@ -25,6 +36,22 @@ impl Icons {
     pub fn load(rl: &mut RaylibHandle, thread: &RaylibThread, size: u32) -> Self {
         let mut svgs = HashMap::new();
         svgs.insert(
+            Icon::ArrowUp,
+            load_svg_texture(rl, thread, "data/icons/arrow-up.svg", size),
+        );
+        svgs.insert(
+            Icon::ChevronDown,
+            load_svg_texture(rl, thread, "data/icons/chevron-down.svg", size),
+        );
+        svgs.insert(
+            Icon::ChevronRight,
+            load_svg_texture(rl, thread, "data/icons/chevron-right.svg", size),
+        );
+        svgs.insert(
+            Icon::File,
+            load_svg_texture(rl, thread, "data/icons/file.svg", size),
+        );
+        svgs.insert(
             Icon::Folder,
             load_svg_texture(rl, thread, "data/icons/folder.svg", size),
         );
@@ -33,16 +60,44 @@ impl Icons {
             load_svg_texture(rl, thread, "data/icons/folder-open.svg", size),
         );
         svgs.insert(
-            Icon::File,
-            load_svg_texture(rl, thread, "data/icons/document.svg", size),
+            Icon::FolderClosed,
+            load_svg_texture(rl, thread, "data/icons/folder-closed.svg", size),
         );
         svgs.insert(
-            Icon::ChevronRight,
-            load_svg_texture(rl, thread, "data/icons/chevron-right.svg", size),
+            Icon::HandGrab,
+            load_svg_texture(rl, thread, "data/icons/hand-grab.svg", size),
         );
         svgs.insert(
-            Icon::ChevronDown,
-            load_svg_texture(rl, thread, "data/icons/chevron-down.svg", size),
+            Icon::Hand,
+            load_svg_texture(rl, thread, "data/icons/hand.svg", size),
+        );
+        svgs.insert(
+            Icon::MousePointer,
+            load_svg_texture(rl, thread, "data/icons/mouse-pointer.svg", size),
+        );
+        svgs.insert(
+            Icon::MoveDiagonalNesw,
+            load_svg_texture(rl, thread, "data/icons/move-diagonal-nesw.svg", size),
+        );
+        svgs.insert(
+            Icon::MoveDiagonalNwse,
+            load_svg_texture(rl, thread, "data/icons/move-diagonal-nwse.svg", size),
+        );
+        svgs.insert(
+            Icon::MoveHorizontal,
+            load_svg_texture(rl, thread, "data/icons/move-horizontal.svg", size),
+        );
+        svgs.insert(
+            Icon::MoveVertical,
+            load_svg_texture(rl, thread, "data/icons/move-vertical.svg", size),
+        );
+        svgs.insert(
+            Icon::Move,
+            load_svg_texture(rl, thread, "data/icons/move.svg", size),
+        );
+        svgs.insert(
+            Icon::Pointer,
+            load_svg_texture(rl, thread, "data/icons/pointer.svg", size),
         );
         svgs.insert(
             Icon::Close,
@@ -90,13 +145,23 @@ fn rasterize_svg_to_png(path: &str, size: u32) -> Result<Vec<u8>> {
     let transform = Transform::from_scale(scale_x, scale_y);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
+    // Force a neutral (white) base so tinting works regardless of SVG fill colors.
+    let mut rgba = pixmap.data().to_vec();
+    for px in rgba.chunks_mut(4) {
+        let a = px[3];
+        px[0] = 255;
+        px[1] = 255;
+        px[2] = 255;
+        px[3] = a;
+    }
+
     let mut png_data = Vec::new();
     {
         let mut encoder = png::Encoder::new(&mut png_data, size, size);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header()?;
-        writer.write_image_data(pixmap.data())?;
+        writer.write_image_data(&rgba)?;
     }
     Ok(png_data)
 }
