@@ -9,7 +9,14 @@ use super::types::{
 
 pub fn metrics_for(project: &ProjectModel, win: &CodeWindow) -> Option<ContentMetrics> {
     let pf = project.parsed.get(&win.file)?;
-    Some(content_metrics(pf, win))
+    if let Some((size, kind, cached)) = win.metrics_cache.borrow().as_ref() {
+        if *size == win.size && *kind == win.view_kind {
+            return Some(cached.clone());
+        }
+    }
+    let metrics = content_metrics(pf, win);
+    *win.metrics_cache.borrow_mut() = Some((win.size, win.view_kind.clone(), metrics.clone()));
+    Some(metrics)
 }
 
 pub fn content_metrics(pf: &ParsedFile, win: &CodeWindow) -> ContentMetrics {

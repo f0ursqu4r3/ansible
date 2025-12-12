@@ -1,18 +1,16 @@
 use std::path::Path;
 
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
+use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 use super::types::{FunctionCall, FunctionDef, ParsedComponents, ParsedFile};
 
 pub(crate) fn parse_tree_sitter(
     path: &Path,
     content: &str,
-    language: &Language,
-    def_query_src: &str,
-    call_query_src: &str,
+    parser: &mut Parser,
+    def_query: &Query,
+    call_query: &Query,
 ) -> anyhow::Result<(ParsedComponents, Tree)> {
-    let mut parser = Parser::new();
-    parser.set_language(language)?;
     let tree = parser
         .parse(content, None)
         .ok_or_else(|| anyhow::anyhow!("parse failed"))?;
@@ -21,8 +19,7 @@ pub(crate) fn parse_tree_sitter(
     let mut calls = Vec::new();
     let bytes = content.as_bytes();
     let mut cursor = QueryCursor::new();
-    let def_query = Query::new(language, def_query_src)?;
-    let mut def_matches = cursor.matches(&def_query, root, bytes);
+    let mut def_matches = cursor.matches(def_query, root, bytes);
     while let Some(m) = def_matches.next() {
         for cap in m.captures.iter() {
             let text = match node_text(cap.node, content) {
@@ -42,9 +39,8 @@ pub(crate) fn parse_tree_sitter(
             });
         }
     }
-    let call_query = Query::new(language, call_query_src)?;
     let mut call_cursor = QueryCursor::new();
-    let mut call_matches = call_cursor.matches(&call_query, root, bytes);
+    let mut call_matches = call_cursor.matches(call_query, root, bytes);
     while let Some(m) = call_matches.next() {
         for cap in m.captures.iter() {
             let text = match node_text(cap.node, content) {

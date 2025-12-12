@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::path::PathBuf;
 
 use raylib::prelude::*;
@@ -40,9 +41,10 @@ pub struct CodeWindow {
     pub dragging_minimap: bool,
     pub drag_start: Vector2,
     pub hover_edges: Option<(bool, bool, bool, bool)>,
+    pub metrics_cache: RefCell<Option<(Vector2, CodeViewKind, ContentMetrics)>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CodeViewKind {
     FullFile,
     SingleFn { start: usize, end: usize },
@@ -89,6 +91,10 @@ impl ContentMetrics {
 }
 
 impl CodeWindow {
+    pub fn clear_metrics_cache(&self) {
+        self.metrics_cache.borrow_mut().take();
+    }
+
     pub fn rect_at(&self, offset: Vector2) -> Rectangle {
         Rectangle {
             x: self.position.x + offset.x,

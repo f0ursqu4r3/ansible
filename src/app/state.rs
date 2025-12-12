@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -151,6 +152,7 @@ impl AppState {
                     dragging_hscroll: false,
                     dragging_minimap: false,
                     drag_start: Vector2 { x: 0.0, y: 0.0 },
+                    metrics_cache: RefCell::new(None),
                 };
                 code_window::clamp_window_scroll(&self.project, &mut win);
                 self.refresh_window_metadata(&mut win);
@@ -251,6 +253,7 @@ impl AppState {
             dragging_hscroll: false,
             dragging_minimap: false,
             drag_start: Vector2 { x: 0.0, y: 0.0 },
+            metrics_cache: RefCell::new(None),
         };
         code_window::clamp_window_scroll(&self.project, &mut win);
         self.refresh_window_metadata(&mut win);
@@ -372,6 +375,7 @@ impl AppState {
             dragging_hscroll: false,
             dragging_minimap: false,
             drag_start: Vector2 { x: 0.0, y: 0.0 },
+            metrics_cache: RefCell::new(None),
         };
         code_window::clamp_window_scroll(&self.project, &mut win);
         self.refresh_window_metadata(&mut win);

@@ -4,6 +4,7 @@ use tree_sitter::{Language, Point, Query, QueryCursor, StreamingIterator, Tree};
 use crate::theme::Palette;
 
 use super::types::{FunctionCall, HighlightKind, HighlightSpan, ParsedFile};
+use std::ops::Range;
 
 #[derive(Clone, Debug)]
 struct HighlightCapture {
@@ -226,7 +227,7 @@ pub fn colorized_segments_with_calls(
     line_idx: usize,
     calls: &[&FunctionCall],
     palette: &Palette,
-) -> Vec<(String, RayColor)> {
+) -> Vec<(Range<usize>, RayColor)> {
     if line_idx >= pf.lines.len() {
         return Vec::new();
     }
@@ -269,20 +270,19 @@ pub fn colorized_segments_with_calls(
         spans = new_spans;
     }
 
-    let mut segments: Vec<(String, RayColor)> = Vec::new();
+    let mut segments: Vec<(Range<usize>, RayColor)> = Vec::new();
     for (s, e, col) in spans {
         if s >= e || s >= line.len() {
             continue;
         }
         let end = e.min(line.len());
-        let text = line[s..end].to_string();
-        if let Some((last_text, last_col)) = segments.last_mut() {
-            if *last_col == col {
-                last_text.push_str(&text);
+        if let Some((last_range, last_col)) = segments.last_mut() {
+            if *last_col == col && last_range.end == s {
+                last_range.end = end;
                 continue;
             }
         }
-        segments.push((text, col));
+        segments.push((s..end, col));
     }
 
     segments

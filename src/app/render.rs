@@ -193,7 +193,23 @@ impl AppState {
                 let c1 = Vector2::new(start_pt.x + handle, start_pt.y);
                 let c2 = Vector2::new(end_pt.x - handle, end_pt.y);
                 let points = [start_pt, c1, c2, end_pt];
-                let dist = min_distance_to_cubic(&points, world_mouse);
+                // Early out with a cheap AABB check before the expensive curve distance.
+                let (mut min_x, mut max_x, mut min_y, mut max_y) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+                for p in points {
+                    min_x = min_x.min(p.x);
+                    max_x = max_x.max(p.x);
+                    min_y = min_y.min(p.y);
+                    max_y = max_y.max(p.y);
+                }
+                let bbox_hit = world_mouse.x + link_hover_tolerance >= min_x
+                    && world_mouse.x - link_hover_tolerance <= max_x
+                    && world_mouse.y + link_hover_tolerance >= min_y
+                    && world_mouse.y - link_hover_tolerance <= max_y;
+                let dist = if bbox_hit {
+                    min_distance_to_cubic(&points, world_mouse)
+                } else {
+                    f32::INFINITY
+                };
                 self.call_links.push(super::types::CallLink {
                     points,
                     caller_idx,

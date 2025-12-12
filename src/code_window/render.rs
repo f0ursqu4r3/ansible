@@ -168,9 +168,10 @@ fn draw_code(
             let line_idx = view_start + idx;
             let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
 
+            let line = &file.lines[line_idx];
             let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
             let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
-            draw_segments(&mut code_scope, font, text_start_x, y, &segments);
+            draw_segments(&mut code_scope, font, text_start_x, y, line, &segments);
             y += LINE_HEIGHT;
         }
     }
@@ -258,8 +259,8 @@ fn draw_code(
             let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
             let mut x = mini.x + 2.0;
             let char_w = (2.0 * geo.scale).max(1.0);
-            for (text, color) in segments {
-                for ch in text.chars() {
+            for (range, color) in segments {
+                for ch in line[range.clone()].chars() {
                     if ch.is_whitespace() {
                         x += char_w;
                         continue;

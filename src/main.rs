@@ -201,10 +201,12 @@ pub fn draw_segments(
     font: &AppFont,
     base_x: f32,
     y: f32,
-    segments: &[(String, Color)],
+    line: &str,
+    segments: &[(std::ops::Range<usize>, Color)],
 ) {
     let mut x = base_x;
-    for (text, color) in segments {
+    for (range, color) in segments {
+        let text = &line[range.clone()];
         font.draw_text_ex(d, text, Vector2::new(x, y), FONT_SIZE, 0.0, *color);
         x += font.measure_width(text, FONT_SIZE, 0.0);
     }

@@ -32,6 +32,9 @@ pub struct SidebarState {
     pub scroll: f32,
     pub collapsed_dirs: HashSet<PathBuf>,
     icons: Icons,
+    entries: Vec<TreeEntry>,
+    entries_version: usize,
+    entries_dirty: bool,
 }
 
 impl SidebarState {
@@ -42,7 +45,14 @@ impl SidebarState {
             scroll: 0.0,
             collapsed_dirs: HashSet::new(),
             icons: Icons::load(rl, thread, 16),
+            entries: Vec::new(),
+            entries_version: 0,
+            entries_dirty: true,
         }
+    }
+
+    pub fn mark_tree_dirty(&mut self) {
+        self.entries_dirty = true;
     }
 
     pub fn search_rect(&self) -> Rectangle {
@@ -114,15 +124,30 @@ impl SidebarState {
         text.contains(query)
     }
 
-    fn filter_entries<'a>(&self, entries: &'a [TreeEntry], query: &str) -> Vec<&'a TreeEntry> {
-        if query.is_empty() {
-            entries.iter().collect()
-        } else {
-            entries
-                .iter()
-                .filter(|e| self.matches_query(e, query))
-                .collect()
+    fn visible_entries<'a>(
+        &'a self,
+        entries: &'a [TreeEntry],
+        query: &str,
+    ) -> Vec<&'a TreeEntry> {
+        let mut out = Vec::new();
+        let mut skip_depth: Option<usize> = None;
+        for entry in entries {
+            if let Some(depth) = skip_depth {
+                if entry.depth > depth {
+                    continue;
+                }
+                skip_depth = None;
+            }
+            let is_collapsed = entry.is_dir && self.is_collapsed(&entry.path);
+            let matches = self.matches_query(entry, query);
+            if matches {
+                out.push(entry);
+            }
+            if is_collapsed {
+                skip_depth = Some(entry.depth);
+            }
         }
+        out
     }
 
     fn definition_matches<'a>(
@@ -153,58 +178,51 @@ impl SidebarState {
         height
     }
 
-    fn sidebar_entries(&self, project: &ProjectModel) -> Vec<TreeEntry> {
-        let mut entries = Vec::new();
-        let mut seen_dirs: HashSet<PathBuf> = HashSet::new();
-        let mut files: Vec<PathBuf> = project.files.iter().cloned().collect();
-        files.sort();
+    fn ensure_entries(&mut self, project: &ProjectModel) {
+        if self.entries_dirty || self.entries_version != project.files.len() {
+            self.entries.clear();
+            self.entries_version = project.files.len();
+            let mut seen_dirs: HashSet<PathBuf> = HashSet::new();
+            let mut files: Vec<PathBuf> = project.files.iter().cloned().collect();
+            files.sort();
 
-        for full in files {
-            let rel = full.strip_prefix(&project.root).unwrap_or(&full);
-            let comps: Vec<_> = rel.iter().collect();
-            if comps.is_empty() {
-                continue;
-            }
-
-            let mut cur = PathBuf::new();
-            let mut parent_collapsed = false;
-            let last_idx = comps.len().saturating_sub(1);
-            for (i, comp) in comps.iter().enumerate().take(last_idx) {
-                cur.push(comp);
-                if seen_dirs.insert(cur.clone()) {
-                    let depth = i;
-                    let name = comp.to_string_lossy().to_string();
-                    entries.push(TreeEntry {
-                        path: cur.clone(),
-                        display: name,
-                        depth,
-                        is_dir: true,
-                    });
+            for full in files {
+                let rel = full.strip_prefix(&project.root).unwrap_or(&full);
+                let comps: Vec<_> = rel.iter().collect();
+                if comps.is_empty() {
+                    continue;
                 }
-                if self.is_collapsed(&cur) {
-                    parent_collapsed = true;
-                    break;
+
+                let mut cur = PathBuf::new();
+                let last_idx = comps.len().saturating_sub(1);
+                for (i, comp) in comps.iter().enumerate().take(last_idx) {
+                    cur.push(comp);
+                    if seen_dirs.insert(cur.clone()) {
+                        let depth = i;
+                        let name = comp.to_string_lossy().to_string();
+                        self.entries.push(TreeEntry {
+                            path: cur.clone(),
+                            display: name,
+                            depth,
+                            is_dir: true,
+                        });
+                    }
                 }
-            }
 
-            if parent_collapsed {
-                continue;
+                let depth = last_idx;
+                let name = comps
+                    .last()
+                    .map(|c| c.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                self.entries.push(TreeEntry {
+                    path: rel.to_path_buf(),
+                    display: name,
+                    depth,
+                    is_dir: false,
+                });
             }
-
-            let depth = last_idx;
-            let name = comps
-                .last()
-                .map(|c| c.to_string_lossy().to_string())
-                .unwrap_or_default();
-            entries.push(TreeEntry {
-                path: rel.to_path_buf(),
-                display: name,
-                depth,
-                is_dir: false,
-            });
+            self.entries_dirty = false;
         }
-
-        entries
     }
 
     pub fn handle_wheel(
@@ -219,8 +237,12 @@ impl SidebarState {
             return false;
         }
         let query = self.search_query.to_lowercase();
-        let entries = self.sidebar_entries(project);
-        let filtered = self.filter_entries(&entries, &query);
+        self.ensure_entries(project);
+        let filtered: Vec<TreeEntry> = self
+            .visible_entries(&self.entries, &query)
+            .into_iter()
+            .cloned()
+            .collect();
         let matches = self.definition_matches(defs, &query);
         let start_y = self.list_start_y();
         let content_height = self.content_height(filtered.len(), matches.len());
@@ -239,12 +261,16 @@ impl SidebarState {
             return None;
         }
         let query = self.search_query.to_lowercase();
-        let entries = self.sidebar_entries(project);
-        let filtered = self.filter_entries(&entries, &query);
+        self.ensure_entries(project);
+        let filtered: Vec<TreeEntry> = self
+            .visible_entries(&self.entries, &query)
+            .into_iter()
+            .cloned()
+            .collect();
         let matches = self.definition_matches(defs, &query);
         let mut y = self.list_start_y() - self.scroll;
         for entry in filtered {
-            let rect = self.entry_rect(entry, y);
+            let rect = self.entry_rect(&entry, y);
             if point_in_rect(mouse, rect) {
                 if entry.is_dir {
                     self.toggle_dir(&entry.path);
@@ -345,8 +371,12 @@ impl SidebarState {
 
         let query = self.search_query.to_lowercase();
         let start_y = self.list_start_y();
-        let entries = self.sidebar_entries(project);
-        let filtered = self.filter_entries(&entries, &query);
+        self.ensure_entries(project);
+        let filtered: Vec<TreeEntry> = self
+            .visible_entries(&self.entries, &query)
+            .into_iter()
+            .cloned()
+            .collect();
         let matches = self.definition_matches(defs, &query);
         let visible_height = (d.get_screen_height() as f32 - start_y).max(0.0);
         let content_height = self.content_height(filtered.len(), matches.len());
@@ -359,7 +389,7 @@ impl SidebarState {
             let mut scoped =
                 d.begin_scissor_mode(0, start_y as i32, SIDEBAR_WIDTH as i32, scissor_height);
             for entry in filtered {
-                let rect = self.entry_rect(entry, visible_y);
+                let rect = self.entry_rect(&entry, visible_y);
                 if rect.y + rect.height < start_y {
                     visible_y += SIDEBAR_ROW_H;
                     continue;

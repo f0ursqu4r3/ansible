@@ -281,6 +281,7 @@ impl AppState {
                     }
                     w.position = new_pos;
                     w.size = new_size;
+                    w.clear_metrics_cache();
                     code_window::clamp_window_scroll(&self.project, w);
                 }
                 if w.dragging_vscroll {

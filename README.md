@@ -29,10 +29,11 @@ cargo run -- .          # or pass another project root
 Requires a desktop with raylib-compatible graphics. Tested on Rust 1.78+.
 
 ## Notes and limits
-- Parsing uses a plugin-based Tree-sitter pipeline (Rust, Python, JavaScript, TypeScript/TSX) and a fallback for unknown files. Rust spans include basic module hints; full type/trait resolution is not implemented. If multiple defs share a name, the closest module match is preferred.
+- Parsing uses a plugin-based Tree-sitter pipeline (Rust, Python, JavaScript, TypeScript/TSX) and a fallback for unknown files. Parsers/queries are cached per language to speed startup. Rust spans include basic module hints; full type/trait resolution is not implemented. If multiple defs share a name, the closest module match is preferred.
 - Syntax highlighting is lightweight (keywords/strings/comments + call highlights), not a full lexer.
 - Module breadcrumbs use the first definition's module path as a hint; nested module files declared externally aren't expanded yet.
 - Layout persistence stores relative paths only; deleting/renaming files will drop those windows on next load.
+- Sidebar/file tree and per-window metrics are cached and invalidated on resize or when the tree changes; future file watchers can mark the tree dirty without full rebuilds every frame.
 
 ## Next ideas
 - Richer analysis (trait/impl resolution, `use` following, cross-language symbol links).
