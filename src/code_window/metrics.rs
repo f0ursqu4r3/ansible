@@ -106,13 +106,28 @@ pub fn minimap_geometry(
     let raw_scale = (mini.height / metrics.total_height.max(1.0)).max(0.001);
     let line_step = (LINE_HEIGHT * raw_scale).clamp(1.0, 2.0);
     let scale = line_step / LINE_HEIGHT;
-    let view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
+    let content_height = metrics.total_height * scale;
+    let mut view_h = (metrics.avail_height * scale).clamp(4.0, mini.height);
+    if content_height > 0.0 {
+        view_h = view_h.min(content_height);
+    }
 
-    let scroll_scaled = win.scroll * scale;
-    let unclamped_view_y = mini.y + scroll_scaled;
-    let max_view_y = (mini.y + mini.height - view_h).max(mini.y);
-    let view_y = unclamped_view_y.clamp(mini.y, max_view_y);
-    let content_top = view_y - scroll_scaled;
+    let scroll_range = metrics.max_scroll_y();
+    let scroll_frac = if scroll_range > 0.0 {
+        (win.scroll / scroll_range).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    let content_track = (content_height - view_h).max(0.0);
+    let mini_track = (mini.height - view_h).max(0.0);
+    let track_h = content_track.min(mini_track);
+
+    let view_y = mini.y + scroll_frac * track_h;
+
+    let offset_max = (content_height - mini.height).max(0.0);
+    let content_top = mini.y - scroll_frac * offset_max;
+    let max_view_y = mini.y + track_h;
 
     MinimapGeometry {
         line_step,

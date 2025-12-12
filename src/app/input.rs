@@ -347,11 +347,16 @@ impl AppState {
                     if let Some(metrics) = code_window::metrics_for(&self.project, w) {
                         if let Some(mini) = w.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0)) {
                             let geo = minimap_geometry(w, &metrics, mini);
+                            let track_h = (geo.max_view_y - mini.y).max(0.0);
                             let view_y =
                                 (world_mouse.y - w.drag_start.y).clamp(mini.y, geo.max_view_y);
                             let scroll_range = metrics.max_scroll_y().max(0.0);
-                            let scroll = ((view_y - mini.y) / geo.scale).clamp(0.0, scroll_range);
-                            w.scroll = scroll;
+                            let ratio = if track_h > 0.0 {
+                                (view_y - mini.y) / track_h
+                            } else {
+                                0.0
+                            };
+                            w.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
                         }
                     }
                 }
@@ -451,12 +456,16 @@ impl AppState {
                                         win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0))
                                     {
                                         let geo = minimap_geometry(win, &metrics, mini);
+                                        let track_h = (geo.max_view_y - mini.y).max(0.0);
                                         let view_y = (world_mouse.y - grab_offset)
                                             .clamp(mini.y, geo.max_view_y);
                                         let scroll_range = metrics.max_scroll_y().max(0.0);
-                                        let scroll = ((view_y - mini.y) / geo.scale)
-                                            .clamp(0.0, scroll_range);
-                                        win.scroll = scroll;
+                                        let ratio = if track_h > 0.0 {
+                                            (view_y - mini.y) / track_h
+                                        } else {
+                                            0.0
+                                        };
+                                        win.scroll = (ratio * scroll_range).clamp(0.0, scroll_range);
                                     }
                                 }
                                 win.dragging_vscroll = false;
