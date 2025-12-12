@@ -138,6 +138,73 @@ fn draw_code(
         screen_scissor.height as i32,
     );
 
+    let start_y = content_rect.y + BREADCRUMB_HEIGHT;
+    let text_area_height = metrics.avail_height;
+    let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
+    let lines_visible = ((text_area_height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
+    let bottom = (top_visible + lines_visible + 1).min(view_lines.len());
+
+    let code_scissor_w = (scissor_w - CODE_X_OFFSET).max(1.0);
+    let code_scissor_h = (scissor_h - BREADCRUMB_HEIGHT).max(1.0);
+    let code_scissor = world_to_screen_rect(
+        Rectangle {
+            x: content_rect.x + CODE_X_OFFSET,
+            y: content_rect.y + BREADCRUMB_HEIGHT,
+            width: code_scissor_w,
+            height: code_scissor_h,
+        },
+        pan,
+        zoom,
+    );
+    {
+        let mut code_scope = scoped.begin_scissor_mode(
+            code_scissor.x as i32,
+            code_scissor.y as i32,
+            code_scissor.width as i32,
+            code_scissor.height as i32,
+        );
+        let mut y = start_y - (win.scroll % LINE_HEIGHT);
+        for idx in top_visible..bottom {
+            let line_idx = view_start + idx;
+            let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
+
+            let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
+            let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
+            draw_segments(&mut code_scope, font, text_start_x, y, &segments);
+            y += LINE_HEIGHT;
+        }
+    }
+
+    let gutter_width = CODE_X_OFFSET - 4.0;
+    scoped.draw_rectangle(
+        content_rect.x as i32,
+        start_y as i32,
+        gutter_width as i32,
+        (metrics.avail_height + LINE_HEIGHT) as i32,
+        palette.window,
+    );
+    let mut y_nums = start_y - (win.scroll % LINE_HEIGHT);
+    for idx in top_visible..bottom {
+        let line_idx = view_start + idx;
+        font.draw_text_ex(
+            &mut scoped,
+            &format!("{:>4}", line_idx + 1),
+            Vector2::new(content_rect.x + 4.0, y_nums),
+            FONT_SIZE - 2.0,
+            0.0,
+            palette.line_num,
+        );
+        y_nums += LINE_HEIGHT;
+    }
+
+    let breadcrumb_rect = Rectangle {
+        x: content_rect.x,
+        y: content_rect.y,
+        width: scissor_w,
+        height: BREADCRUMB_HEIGHT,
+    };
+    scoped.draw_rectangle_rec(breadcrumb_rect, palette.window);
+
     let mut breadcrumb = project.display_name(&file.path);
     if let Some(mod_path) = file.defs.first().map(|d| d.module_path.as_str()) {
         breadcrumb.push_str(" - ");
@@ -151,41 +218,6 @@ fn draw_code(
         0.0,
         palette.breadcrumb,
     );
-
-    let start_y = content_rect.y + BREADCRUMB_HEIGHT;
-    let text_area_height = metrics.avail_height;
-    let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
-    let lines_visible = ((text_area_height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
-    let bottom = (top_visible + lines_visible + 1).min(view_lines.len());
-    let mut y = start_y - (win.scroll % LINE_HEIGHT);
-
-    let gutter_width = CODE_X_OFFSET - 4.0;
-    scoped.draw_rectangle(
-        content_rect.x as i32,
-        start_y as i32,
-        gutter_width as i32,
-        (metrics.avail_height + LINE_HEIGHT) as i32,
-        palette.window,
-    );
-
-    for idx in top_visible..bottom {
-        let line_idx = view_start + idx;
-        let text_start_x = content_rect.x + CODE_X_OFFSET - win.scroll_x;
-
-        let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
-        let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
-        draw_segments(&mut scoped, font, text_start_x, y, &segments);
-
-        font.draw_text_ex(
-            &mut scoped,
-            &format!("{:>4}", line_idx + 1),
-            Vector2::new(content_rect.x + 4.0, y),
-            FONT_SIZE - 2.0,
-            0.0,
-            palette.line_num,
-        );
-        y += LINE_HEIGHT;
-    }
     drop(scoped);
 
     if let Some(mini) = win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0)) {
