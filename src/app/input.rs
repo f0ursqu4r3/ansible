@@ -109,12 +109,17 @@ impl AppState {
         }
 
         if left_pressed {
-            if let Some((link_idx, group_len)) = self.hit_call_link(world_mouse) {
-                if let Some(link) = self.call_links.get(link_idx) {
-                    let caller_idx = link.caller_idx;
-                    if caller_idx < self.windows.len() {
-                        let mut scrolled = false;
-                        {
+            let over_window = self
+                .windows
+                .iter()
+                .any(|w| point_in_rect(world_mouse, w.rect_at(Vector2::new(0.0, 0.0))));
+            if !over_window {
+                if let Some((link_idx, group_len)) = self.hit_call_link(world_mouse) {
+                    if let Some(link) = self.call_links.get(link_idx) {
+                        let caller_idx = link.caller_idx;
+                        if caller_idx < self.windows.len() {
+                            let mut scrolled = false;
+                            {
                             let win = &mut self.windows[caller_idx];
                             if self.project.parsed.contains_key(&win.file) {
                                 let line = link.line;
@@ -141,6 +146,7 @@ impl AppState {
                     }
                 }
             }
+        }
         }
 
         let pan_initiated = middle_pressed || (space_down && left_pressed);

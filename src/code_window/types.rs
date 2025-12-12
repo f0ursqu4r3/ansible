@@ -15,7 +15,6 @@ pub const SCROLLBAR_MIN_THUMB: f32 = 18.0;
 pub const CONTENT_PADDING: f32 = 8.0;
 pub const RIGHT_TEXT_PAD: f32 = 24.0;
 pub const MINIMAP_WIDTH: f32 = 64.0;
-pub const MINIMAP_PADDING: f32 = 6.0;
 
 #[derive(Clone, Debug)]
 pub struct CodeWindow {
@@ -119,18 +118,23 @@ impl CodeWindow {
 
     pub fn minimap_rect_at(&self, metrics: &ContentMetrics, offset: Vector2) -> Option<Rectangle> {
         let content = self.content_rect_at(offset);
-        let gutter = if metrics.show_v {
+        let v_gutter = if metrics.show_v {
             SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
         } else {
             0.0
         };
-        let x = content.x + content.width - MINIMAP_WIDTH - gutter - MINIMAP_PADDING;
+        let h_gutter = if metrics.show_h {
+            SCROLLBAR_THICKNESS + SCROLLBAR_PADDING
+        } else {
+            0.0
+        };
+        let x = content.x + content.width - MINIMAP_WIDTH - v_gutter;
         let width = MINIMAP_WIDTH;
-        if width <= 0.0 || content.width < width + gutter + MINIMAP_PADDING {
+        if width <= 0.0 || content.width < width + v_gutter {
             return None;
         }
-        let height = metrics.avail_height;
-        if height <= 0.0 {
+        let height = content.height - BREADCRUMB_HEIGHT - h_gutter;
+        if height <= 0.0 || content.height < BREADCRUMB_HEIGHT {
             return None;
         }
         Some(Rectangle {
