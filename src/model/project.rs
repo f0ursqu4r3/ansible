@@ -77,15 +77,17 @@ impl ProjectModel {
                 spans,
                 color_cache: std::cell::RefCell::new(None),
             };
-            for def in &pf.defs {
-                defs.entry(def.name.clone())
-                    .or_default()
-                    .push(DefinitionLocation {
-                        file: file.clone(),
-                        module_path: def.module_path.clone(),
-                        line: def.line,
-                        col: def.col,
-                    });
+            if file.starts_with(&root) {
+                for def in &pf.defs {
+                    defs.entry(def.name.clone())
+                        .or_default()
+                        .push(DefinitionLocation {
+                            file: file.clone(),
+                            module_path: def.module_path.clone(),
+                            line: def.line,
+                            col: def.col,
+                        });
+                }
             }
             parsed.insert(file, pf);
             Ok(())

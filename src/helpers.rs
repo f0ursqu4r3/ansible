@@ -21,20 +21,12 @@ pub fn module_for_path(path: &Path) -> String {
 
     // For lib.rs/main.rs, use the crate directory name instead of the generic file stem.
     if file_stem == "lib" || file_stem == "main" || file_stem == "mod" {
-        if let Some(parent) = path.parent() {
-            // Prefer the crate dir when files live under a src/ directory.
-            let candidate = if parent.file_name().and_then(|s| s.to_str()) == Some("src") {
-                parent.parent()
-            } else {
-                Some(parent)
-            };
-
-            if let Some(dir) = candidate
-                .and_then(|p| p.file_name())
-                .and_then(|s| s.to_str())
-            {
-                return strip_version_suffix(dir);
-            }
+        if let Some(dir) = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+        {
+            return strip_version_suffix(dir);
         }
     }
 
