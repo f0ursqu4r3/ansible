@@ -12,12 +12,15 @@ pub enum Icon {
     ArrowUp,
     ChevronDown,
     ChevronRight,
+    Ellipsis,
+    EllipsisVertical,
     File,
     FolderClosed,
     FolderOpen,
     Folder,
     HandGrab,
     Hand,
+    Menu,
     MousePointer,
     MoveDiagonalNesw,
     MoveDiagonalNwse,
@@ -26,6 +29,8 @@ pub enum Icon {
     Move,
     Pointer,
     Close,
+    ZoomIn,
+    ZoomOut,
 }
 pub struct Icons {
     svgs: HashMap<Icon, Option<Texture2D>>,
@@ -46,6 +51,14 @@ impl Icons {
         svgs.insert(
             Icon::ChevronRight,
             load_svg_texture(rl, thread, "data/icons/chevron-right.svg", size),
+        );
+        svgs.insert(
+            Icon::Ellipsis,
+            load_svg_texture(rl, thread, "data/icons/ellipsis.svg", size),
+        );
+        svgs.insert(
+            Icon::EllipsisVertical,
+            load_svg_texture(rl, thread, "data/icons/ellipsis-vertical.svg", size),
         );
         svgs.insert(
             Icon::File,
@@ -70,6 +83,10 @@ impl Icons {
         svgs.insert(
             Icon::Hand,
             load_svg_texture(rl, thread, "data/icons/hand.svg", size),
+        );
+        svgs.insert(
+            Icon::Menu,
+            load_svg_texture(rl, thread, "data/icons/menu.svg", size),
         );
         svgs.insert(
             Icon::MousePointer,
@@ -102,6 +119,14 @@ impl Icons {
         svgs.insert(
             Icon::Close,
             load_svg_texture(rl, thread, "data/icons/x-mark.svg", size),
+        );
+        svgs.insert(
+            Icon::ZoomIn,
+            load_svg_texture(rl, thread, "data/icons/zoom-in.svg", size),
+        );
+        svgs.insert(
+            Icon::ZoomOut,
+            load_svg_texture(rl, thread, "data/icons/zoom-out.svg", size),
         );
         Self { svgs, size }
     }
