@@ -31,6 +31,7 @@ impl AppState {
             mouse.x / self.zoom - self.pan.x,
             mouse.y / self.zoom - self.pan.y,
         );
+        let link_hover_tolerance = (10.0 / self.zoom.max(0.001)).clamp(8.0, 32.0);
         let over_window = self
             .windows
             .iter()
@@ -56,7 +57,8 @@ impl AppState {
                             .call_links
                             .iter()
                             .any(|l| l.hovered
-                                && min_distance_to_cubic(&l.points, world_mouse) <= 10.0)
+                                && min_distance_to_cubic(&l.points, world_mouse)
+                                    <= link_hover_tolerance)
                         {
                             hover_cursor = Some(MouseCursor::MOUSE_CURSOR_POINTING_HAND);
                         }
@@ -109,6 +111,7 @@ impl AppState {
         d: &mut RaylibMode2D<RaylibDrawHandle>,
         world_mouse: Vector2,
     ) {
+        let link_hover_tolerance = (10.0 / self.zoom.max(0.001)).clamp(8.0, 32.0);
         self.call_links.clear();
         let mut distances = Vec::new();
         let mut fn_windows = Vec::new();
@@ -175,15 +178,20 @@ impl AppState {
                     Some(pf) => pf,
                     None => continue,
                 };
-                let start_pt = caller_win
+                let raw_start = caller_win
                     .line_anchor(caller_pf, line, true)
                     .unwrap_or_else(|| caller_win.center_anchor(true));
-                let end_pt = fn_win.center_anchor(false);
+                let raw_end = fn_win.center_anchor(false);
+
+                let caller_content = caller_win.content_rect_at(Vector2::new(0.0, 0.0));
+                let callee_content = fn_win.content_rect_at(Vector2::new(0.0, 0.0));
+                let start_pt = Vector2::new(caller_content.x + caller_content.width + 6.0, raw_start.y);
+                let end_pt = Vector2::new(callee_content.x - 6.0, raw_end.y);
+
                 let dx = (end_pt.x - start_pt.x).abs().max(40.0);
-                let dir = if end_pt.x >= start_pt.x { 1.0 } else { -1.0 };
-                let handle = dx * 0.35;
-                let c1 = Vector2::new(start_pt.x + dir * handle, start_pt.y);
-                let c2 = Vector2::new(end_pt.x - dir * handle, end_pt.y);
+                let handle = (dx * 0.35).max(50.0);
+                let c1 = Vector2::new(start_pt.x + handle, start_pt.y);
+                let c2 = Vector2::new(end_pt.x - handle, end_pt.y);
                 let points = [start_pt, c1, c2, end_pt];
                 let dist = min_distance_to_cubic(&points, world_mouse);
                 self.call_links.push(super::types::CallLink {
@@ -203,7 +211,7 @@ impl AppState {
         if let Some((idx, _)) = distances
             .iter()
             .enumerate()
-            .filter(|(_, d)| **d <= 10.0)
+            .filter(|(_, d)| **d <= link_hover_tolerance)
             .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         {
             if let Some(link) = self.call_links.get_mut(idx) {
@@ -227,6 +235,14 @@ impl AppState {
                 self.palette.sidebar_highlight
             };
             d.draw_spline_bezier_cubic(&link.points, 2.5, color);
+            let icon_size = self.icons.size() as f32;
+            let end = link.points[3];
+            self.icons.render(
+                d,
+                crate::icons::Icon::ChevronRight,
+                Vector2::new(end.x - icon_size * 0.5, end.y - icon_size * 0.5),
+                color,
+            );
         }
 
         for (rect, _idx) in highlights {

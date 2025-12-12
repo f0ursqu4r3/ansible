@@ -636,7 +636,7 @@ impl AppState {
     }
 
     fn hit_call_link(&mut self, world_mouse: Vector2) -> Option<(usize, usize)> {
-        let tolerance = 10.0;
+        let tolerance = (10.0 / self.zoom.max(0.001)).clamp(8.0, 32.0);
         let mut hits: Vec<usize> = self
             .call_links
             .iter()

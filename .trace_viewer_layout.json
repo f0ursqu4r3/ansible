@@ -24,21 +24,6 @@
       }
     },
     {
-      "file": "src\\app\\input.rs",
-      "view_kind": null,
-      "position": [
-        605.0,
-        397.0
-      ],
-      "size": [
-        852.0,
-        1081.0
-      ],
-      "scroll": 10001.601,
-      "scroll_x": 0.0,
-      "link_from": null
-    },
-    {
       "file": "src\\code_window\\metrics.rs",
       "view_kind": {
         "type": "SingleFn",
@@ -47,8 +32,8 @@
         "title": "metrics_for"
       },
       "position": [
-        1536.0,
-        -87.0
+        1327.0,
+        -121.0
       ],
       "size": [
         720.0,
@@ -60,6 +45,21 @@
         "file": "src\\app\\input.rs",
         "line": 315
       }
+    },
+    {
+      "file": "src\\app\\input.rs",
+      "view_kind": null,
+      "position": [
+        114.0,
+        183.0
+      ],
+      "size": [
+        852.0,
+        1081.0
+      ],
+      "scroll": 7390.4004,
+      "scroll_x": 0.0,
+      "link_from": null
     }
   ],
   "sidebar_scroll": 0.0,
