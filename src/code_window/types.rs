@@ -25,6 +25,8 @@ pub struct CodeWindow {
     pub view_kind: CodeViewKind,
     pub def_refs: Vec<FunctionRef>,
     pub call_refs: Vec<CallRef>,
+    pub folds: Vec<FoldRegion>,
+    pub fold_version: u64,
     pub link_from: Option<CallOrigin>,
     pub position: Vector2,
     pub size: Vector2,
@@ -41,7 +43,7 @@ pub struct CodeWindow {
     pub dragging_minimap: bool,
     pub drag_start: Vector2,
     pub hover_edges: Option<(bool, bool, bool, bool)>,
-    pub metrics_cache: RefCell<Option<(Vector2, CodeViewKind, ContentMetrics)>>,
+    pub metrics_cache: RefCell<Option<(Vector2, CodeViewKind, u64, ContentMetrics)>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -62,6 +64,13 @@ pub struct CallRef {
     pub name: String,
     pub module_path: String,
     pub line: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct FoldRegion {
+    pub start: usize,
+    pub end: usize,
+    pub collapsed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -186,13 +195,9 @@ impl CodeWindow {
         line: usize,
         prefer_right: bool,
     ) -> Option<Rectangle> {
-        let (start, end) = self.view_range(pf);
-        if line > end {
-            return None;
-        }
+        let local_idx = self.visible_index_for(pf, line)?;
         let content = self.content_rect_at(Vector2::new(0.0, 0.0));
         let area_top = content.y + BREADCRUMB_HEIGHT;
-        let local_idx = line.saturating_sub(start);
         let y = area_top + local_idx as f32 * LINE_HEIGHT - self.scroll;
         if y + LINE_HEIGHT < area_top || y > content.y + content.height {
             return None;
@@ -210,6 +215,79 @@ impl CodeWindow {
         })
     }
 
+    pub fn visible_line_indices(&self, pf: &ParsedFile) -> Vec<usize> {
+        if pf.lines.is_empty() {
+            return Vec::new();
+        }
+        let (start, end) = self.view_range(pf);
+        let mut indices = Vec::with_capacity(end.saturating_sub(start) + 1);
+        for line in start..=end {
+            if self.is_line_hidden(line) {
+                continue;
+            }
+            indices.push(line);
+        }
+        indices
+    }
+
+    pub fn visible_index_for(&self, pf: &ParsedFile, line: usize) -> Option<usize> {
+        let indices = self.visible_line_indices(pf);
+        indices.iter().position(|l| *l == line)
+    }
+
+    pub fn view_lines<'a>(&'a self, pf: &'a ParsedFile) -> (Vec<usize>, Vec<&'a String>) {
+        let indices = self.visible_line_indices(pf);
+        let lines = indices
+            .iter()
+            .filter_map(|idx| pf.lines.get(*idx))
+            .collect();
+        (indices, lines)
+    }
+
+    pub fn toggle_fold(&mut self, pf: &ParsedFile, line: usize) -> bool {
+        // If a fold already exists for this start, flip it.
+        if let Some(fold) = self.folds.iter_mut().find(|f| f.start == line) {
+            fold.collapsed = !fold.collapsed;
+            self.fold_version = self.fold_version.wrapping_add(1);
+            self.clear_metrics_cache();
+            return true;
+        }
+
+        // Only fold real multi-line ranges.
+        if let Some(def) = pf
+            .defs
+            .iter()
+            .find(|d| d.line == line && d.end_line > d.line)
+        {
+            self.folds.push(FoldRegion {
+                start: def.line,
+                end: def.end_line,
+                collapsed: true,
+            });
+            self.fold_version = self.fold_version.wrapping_add(1);
+            self.clear_metrics_cache();
+            return true;
+        }
+        false
+    }
+
+    pub fn is_fold_collapsed(&self, line: usize) -> bool {
+        self.folds
+            .iter()
+            .any(|f| f.start == line && f.collapsed)
+    }
+
+    pub fn is_foldable_line(&self, pf: &ParsedFile, line: usize) -> bool {
+        self.folds.iter().any(|f| f.start == line)
+            || pf.defs
+                .iter()
+                .any(|d| d.line == line && d.end_line > d.line)
+    }
+
+    fn is_line_hidden(&self, line: usize) -> bool {
+        self.folds.iter().any(|f| f.collapsed && line > f.start && line <= f.end)
+    }
+
     pub fn view_range(&self, pf: &ParsedFile) -> (usize, usize) {
         if pf.lines.is_empty() {
             return (0, 0);
@@ -223,14 +301,6 @@ impl CodeWindow {
                 if s > e { (e, e) } else { (s, e) }
             }
         }
-    }
-
-    pub fn view_lines<'a>(&'a self, pf: &'a ParsedFile) -> (usize, &'a [String]) {
-        if pf.lines.is_empty() {
-            return (0, &[]);
-        }
-        let (start, end) = self.view_range(pf);
-        (start, &pf.lines[start..=end])
     }
 
     pub fn update_refs(&mut self, pf: &ParsedFile) {

@@ -375,6 +375,16 @@ impl AppState {
                         WindowAction::OpenDefinition { def, origin } => {
                             self.open_definition(def, origin);
                         }
+                        WindowAction::ToggleFold { line } => {
+                            if let Some(win) = self.windows.last_mut() {
+                                if let Some(pf) = self.project.parsed.get(&win.file) {
+                                    if win.toggle_fold(pf, line) {
+                                        code_window::clamp_window_scroll(&self.project, win);
+                                        win.clear_metrics_cache();
+                                    }
+                                }
+                            }
+                        }
                         WindowAction::StartDrag(offset) => {
                             if let Some(win) = self.windows.last_mut() {
                                 win.is_dragging = true;
@@ -550,6 +560,10 @@ impl AppState {
 
         if let Some(pf) = self.project.parsed.get(&win.file) {
             let metrics = code_window::content_metrics(pf, win);
+            if let Some(line) = code_window::hit_test_fold_toggle(win, pf, &self.icons, world_mouse)
+            {
+                return WindowAction::ToggleFold { line };
+            }
             if let Some(mini) = win.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0)) {
                 if point_in_rect(world_mouse, mini) {
                     let geo = minimap_geometry(win, &metrics, mini);

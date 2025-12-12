@@ -9,18 +9,20 @@ use super::types::{
 
 pub fn metrics_for(project: &ProjectModel, win: &CodeWindow) -> Option<ContentMetrics> {
     let pf = project.parsed.get(&win.file)?;
-    if let Some((size, kind, cached)) = win.metrics_cache.borrow().as_ref() {
-        if *size == win.size && *kind == win.view_kind {
+    if let Some((size, kind, fold_version, cached)) = win.metrics_cache.borrow().as_ref() {
+        if *size == win.size && *kind == win.view_kind && *fold_version == win.fold_version {
             return Some(cached.clone());
         }
     }
     let metrics = content_metrics(pf, win);
-    *win.metrics_cache.borrow_mut() = Some((win.size, win.view_kind.clone(), metrics.clone()));
+    *win.metrics_cache.borrow_mut() =
+        Some((win.size, win.view_kind.clone(), win.fold_version, metrics.clone()));
     Some(metrics)
 }
 
 pub fn content_metrics(pf: &ParsedFile, win: &CodeWindow) -> ContentMetrics {
-    let (_, view_lines) = win.view_lines(pf);
+    let visible_indices = win.visible_line_indices(pf);
+    let view_lines: Vec<&String> = visible_indices.iter().filter_map(|idx| pf.lines.get(*idx)).collect();
     let base_width = (win.size.x - CODE_X_OFFSET - RIGHT_TEXT_PAD).max(32.0);
     let base_height =
         (win.size.y - TITLE_BAR_HEIGHT - BREADCRUMB_HEIGHT - CONTENT_PADDING).max(LINE_HEIGHT);

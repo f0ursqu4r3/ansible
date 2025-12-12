@@ -188,21 +188,48 @@ fn merge_spans(mut spans: Vec<HighlightSpan>) -> Vec<HighlightSpan> {
 fn highlight_kind_for_capture(name: &str) -> Option<HighlightKind> {
     if name.starts_with("comment") {
         Some(HighlightKind::Comment)
-    } else if name.starts_with("string") {
+    } else if name.starts_with("string") || name.contains("string") || name.contains("regex") {
         Some(HighlightKind::String)
-    } else if name.starts_with("keyword") || name.starts_with("storage") || name.contains("macro") {
+    } else if name.contains("escape") {
+        Some(HighlightKind::String)
+    } else if name.starts_with("keyword")
+        || name.starts_with("storage")
+        || name.contains("macro")
+        || name.contains("boolean")
+    {
         Some(HighlightKind::Keyword)
-    } else if name.starts_with("function") || name.contains("function") || name.contains("method") {
+    } else if name.starts_with("function")
+        || name.contains("function")
+        || name.contains("method")
+        || name.contains("decorator")
+    {
         Some(HighlightKind::Function)
-    } else if name.starts_with("type") || name.contains("type") || name.contains("constructor") {
+    } else if name.starts_with("type")
+        || name.contains("type")
+        || name.contains("constructor")
+        || name.contains("class")
+        || name.contains("enum")
+        || name.contains("interface")
+        || name.contains("namespace")
+        || name.contains("module")
+        || name.contains("tag")
+    {
         Some(HighlightKind::Type)
     } else if name.starts_with("number") || name.contains("constant.numeric") {
         Some(HighlightKind::Number)
     } else if name.starts_with("constant") || name.contains("constant") {
         Some(HighlightKind::Constant)
-    } else if name.contains("property") || name.contains("field") || name.contains("attribute") {
+    } else if name.contains("property")
+        || name.contains("field")
+        || name.contains("attribute")
+        || name.contains("parameter")
+    {
         Some(HighlightKind::Property)
-    } else if name.contains("operator") || name.starts_with("punctuation") {
+    } else if name.contains("operator")
+        || name.starts_with("punctuation")
+        || name.contains("delimiter")
+        || name.contains("bracket")
+    {
         Some(HighlightKind::Operator)
     } else if name.contains("builtin") || name.contains("variable.builtin") {
         Some(HighlightKind::Builtin)

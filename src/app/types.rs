@@ -131,6 +131,9 @@ pub enum WindowAction {
         def: DefinitionLocation,
         origin: Option<CallOrigin>,
     },
+    ToggleFold {
+        line: usize,
+    },
     StartDrag(Vector2),
     StartResize {
         edges: (bool, bool, bool, bool),

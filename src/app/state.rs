@@ -183,6 +183,8 @@ impl AppState {
                     view_kind,
                     def_refs: Vec::new(),
                     call_refs: Vec::new(),
+                    folds: Vec::new(),
+                    fold_version: 0,
                     link_from: saved.link_from.and_then(|orig| {
                         Some(CallOrigin {
                             file: self.project.root.join(orig.file),
@@ -292,6 +294,8 @@ impl AppState {
             view_kind: CodeViewKind::FullFile,
             def_refs: Vec::new(),
             call_refs: Vec::new(),
+            folds: Vec::new(),
+            fold_version: 0,
             link_from: None,
             position: pos,
             size: Vector2::new(720.0, 460.0),
@@ -465,6 +469,8 @@ impl AppState {
             view_kind,
             def_refs: Vec::new(),
             call_refs: Vec::new(),
+            folds: Vec::new(),
+            fold_version: 0,
             link_from: origin,
             position: self
                 .last_mouse_world
