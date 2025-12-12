@@ -1,4 +1,5 @@
 # Agent Notes
+
 - Entry point: `src/main.rs`. UI built with `raylib` (WeakFont for measurements).
 - Parsing: `ProjectModel` uses a Tree-sitter plugin pipeline (Rust, Python, JS, TS/TSX; fallbacks for others) to build `ParsedFile` (lines, defs, calls) and a `defs` index keyed by name. Parsers and def/call queries are pooled per language to avoid recompilation. Syntax highlighting uses Tree-sitter highlight queries (keywords/strings/comments + call highlights). Module hints come from file stems; no full resolution. Parsed files cache colorized highlight ranges by palette hash so theme changes rebuild spans.
 - Data flow: `AppState` owns windows, search state, and persists layouts to `.trace_viewer_layout.json` in the project root. `find_function_span` groups Rust types with their `impl` blocks and uses stored end positions plus doc/attribute uplift.
@@ -8,5 +9,6 @@
 - Fonts: `load_monospace_font` tries `TRACE_VIEWER_FONT`, bundled fonts under `data/fonts/`, common OS monospace fonts, then falls back to raylib default. `AppFont` abstracts owned vs default fonts for draw/measure.
 - Persistence/theme: Color/theme constants live near the top; spacing/highlight colors centralized. Layout persistence stores relative paths. Syntax spans/minimap rendering operate on slice ranges; cached color spans are invalidated when the palette hash changes.
 - Caching: Sidebar flattens the file tree once and marks it dirty on demand; per-window content metrics are cached and invalidated on resize/view changes. Call-link hover checks use a cheap bbox before curve distance.
-- File watching: A notify watcher marks the project dirty on fs events; reload merges new parsing and resets sidebar cache.
+- File watching: A notify watcher marks the project dirty on fs events. Reload now happens off the render thread (background parse) and swaps in when ready, keeping the UI responsive.
 - Known gaps: no full module/trait resolution; external `mod` files aren’t parsed; no keyboard shortcuts/backstack; highlighting is minimal; theme changes require explicit palette reload to flush caches; file-tree watcher reloads everything rather than diffing.
+- Git Commits: Message should be detailed

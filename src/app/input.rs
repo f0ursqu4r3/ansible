@@ -120,33 +120,34 @@ impl AppState {
                         if caller_idx < self.windows.len() {
                             let mut scrolled = false;
                             {
-                            let win = &mut self.windows[caller_idx];
-                            if self.project.parsed.contains_key(&win.file) {
-                                let line = link.line;
-                                let local_line = match win.view_kind {
-                                    CodeViewKind::SingleFn { start, .. } => {
-                                        line.saturating_sub(start)
-                                    }
-                                    _ => line,
-                                };
-                                let max_scroll = code_window::metrics_for(&self.project, win)
-                                    .map(|m| m.max_scroll_y())
-                                    .unwrap_or(0.0);
-                                win.scroll =
-                                    (local_line as f32 * LINE_HEIGHT - 40.0).clamp(0.0, max_scroll);
-                                win.focus_line = Some(line);
-                                scrolled = true;
+                                let win = &mut self.windows[caller_idx];
+                                if self.project.parsed.contains_key(&win.file) {
+                                    let line = link.line;
+                                    let local_line = match win.view_kind {
+                                        CodeViewKind::SingleFn { start, .. } => {
+                                            line.saturating_sub(start)
+                                        }
+                                        _ => line,
+                                    };
+                                    let max_scroll = code_window::metrics_for(&self.project, win)
+                                        .map(|m| m.max_scroll_y())
+                                        .unwrap_or(0.0);
+                                    win.scroll = (local_line as f32 * LINE_HEIGHT - 40.0)
+                                        .clamp(0.0, max_scroll);
+                                    win.focus_line = Some(line);
+                                    scrolled = true;
+                                }
                             }
-                        }
-                        if scrolled {
-                            self.bring_to_front(caller_idx);
-                            self.last_link_cycle = Some((world_mouse, (link_idx + 1) % group_len));
-                            return;
+                            if scrolled {
+                                self.bring_to_front(caller_idx);
+                                self.last_link_cycle =
+                                    Some((world_mouse, (link_idx + 1) % group_len));
+                                return;
+                            }
                         }
                     }
                 }
             }
-        }
         }
 
         let pan_initiated = middle_pressed || (space_down && left_pressed);
@@ -323,8 +324,8 @@ impl AppState {
                     if let Some(metrics) = code_window::metrics_for(&self.project, w) {
                         if let Some(mini) = w.minimap_rect_at(&metrics, Vector2::new(0.0, 0.0)) {
                             let geo = minimap_geometry(w, &metrics, mini);
-                            let view_y = (world_mouse.y - w.drag_start.y)
-                                .clamp(mini.y, geo.max_view_y);
+                            let view_y =
+                                (world_mouse.y - w.drag_start.y).clamp(mini.y, geo.max_view_y);
                             let scroll_range = metrics.max_scroll_y().max(0.0);
                             let scroll = ((view_y - mini.y) / geo.scale).clamp(0.0, scroll_range);
                             w.scroll = scroll;
@@ -408,8 +409,8 @@ impl AppState {
                                         let view_y = (world_mouse.y - grab_offset)
                                             .clamp(mini.y, geo.max_view_y);
                                         let scroll_range = metrics.max_scroll_y().max(0.0);
-                                        let scroll =
-                                            ((view_y - mini.y) / geo.scale).clamp(0.0, scroll_range);
+                                        let scroll = ((view_y - mini.y) / geo.scale)
+                                            .clamp(0.0, scroll_range);
                                         win.scroll = scroll;
                                     }
                                 }

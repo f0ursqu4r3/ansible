@@ -7,7 +7,7 @@ use super::types::{FunctionCall, HighlightKind, HighlightSpan, ParsedFile};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
-use std::rc::Rc;
+use std::sync::Arc;
 
 type ColorSegments = Vec<Vec<(Range<usize>, RayColor)>>;
 
@@ -238,12 +238,12 @@ pub fn colorized_segments_with_calls(
     }
     let line = &pf.lines[line_idx];
     let palette_hash = palette_hash(palette);
-    let base_segments: Rc<ColorSegments> = {
+    let base_segments: Arc<ColorSegments> = {
         let mut cache = pf.color_cache.borrow_mut();
         match cache.as_ref() {
             Some((h, segs)) if *h == palette_hash => segs.clone(),
             _ => {
-                let segs: Rc<ColorSegments> = Rc::new(
+                let segs: Arc<ColorSegments> = Arc::new(
                     pf.spans
                         .iter()
                         .map(|line_spans| {

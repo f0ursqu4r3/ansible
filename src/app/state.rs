@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::time::Instant;
 use std::time::Duration;
 
@@ -39,6 +40,8 @@ pub struct AppState {
     pub(crate) last_link_cycle: Option<(Vector2, usize)>, // click pos, index in group
     pub(crate) project_dirty: bool,
     pub(crate) last_reload: Instant,
+    pub(crate) reload_rx: Option<Receiver<anyhow::Result<ProjectModel>>>,
+    pub(crate) reload_inflight: bool,
 }
 
 impl AppState {
@@ -70,6 +73,8 @@ impl AppState {
             last_link_cycle: None,
             project_dirty: false,
             last_reload: Instant::now(),
+            reload_rx: None,
+            reload_inflight: false,
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -462,27 +467,43 @@ impl AppState {
     }
 
     pub fn reload_project_if_needed(&mut self) -> anyhow::Result<()> {
+        if self.reload_inflight {
+            if let Some(rx) = self.reload_rx.as_ref() {
+                if let Ok(res) = rx.try_recv() {
+                    self.reload_inflight = false;
+                    self.project_dirty = false;
+                    self.last_reload = Instant::now();
+                    self.reload_rx = None;
+                    let new_project = res?;
+                    self.project = new_project;
+                    self.sidebar.mark_tree_dirty();
+                    {
+                        let project_ref = &self.project;
+                        for win in &mut self.windows {
+                            code_window::clamp_window_scroll(project_ref, win);
+                        }
+                    }
+                    for win in &mut self.windows {
+                        Self::refresh_window_metadata_with_project(&self.project, win);
+                    }
+                }
+            }
+            return Ok(());
+        }
         if !self.project_dirty {
             return Ok(());
         }
-        let now = Instant::now();
-        if now.duration_since(self.last_reload) < Duration::from_millis(200) {
+        if Instant::now().duration_since(self.last_reload) < Duration::from_millis(200) {
             return Ok(());
         }
-        let new_project = ProjectModel::load(&self.project.root)?;
-        self.project = new_project;
-        self.sidebar.mark_tree_dirty();
-        {
-            let project_ref = &self.project;
-            for win in &mut self.windows {
-                code_window::clamp_window_scroll(project_ref, win);
-            }
-        }
-        for win in &mut self.windows {
-            Self::refresh_window_metadata_with_project(&self.project, win);
-        }
-        self.project_dirty = false;
-        self.last_reload = now;
+        let root = self.project.root.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.reload_rx = Some(rx);
+        self.reload_inflight = true;
+        std::thread::spawn(move || {
+            let res = ProjectModel::load(&root);
+            let _ = tx.send(res);
+        });
         Ok(())
     }
 }
