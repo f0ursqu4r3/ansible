@@ -3,6 +3,7 @@ use std::path::Path;
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 use super::types::{FunctionCall, FunctionDef, ParsedComponents, ParsedFile};
+use crate::helpers::module_for_path;
 
 pub(crate) fn parse_tree_sitter(
     path: &Path,
@@ -19,6 +20,7 @@ pub(crate) fn parse_tree_sitter(
     let mut calls = Vec::new();
     let bytes = content.as_bytes();
     let mut cursor = QueryCursor::new();
+    let wildcard_imports = collect_wildcard_imports(root, content);
     let mut def_matches = cursor.matches(def_query, root, bytes);
     while let Some(m) = def_matches.next() {
         for cap in m.captures.iter() {
@@ -53,18 +55,27 @@ pub(crate) fn parse_tree_sitter(
                 Some(t) => t,
                 None => continue,
             };
+            if in_use_declaration(cap.node) {
+                continue;
+            }
             let pos = cap.node.start_position();
-            let mut module_path = module_for_path(path);
+            let default_mod = module_for_path(path);
+            let mut module_path = default_mod.clone();
             if let Some(parent) = cap.node.parent() {
                 if parent.kind() == "scoped_identifier" || parent.kind() == "scoped_type_identifier"
                 {
                     if let Some(full) = node_text(parent, content) {
-                        if let Some(prefix) = scoped_prefix(full) {
+                        if let Some(base) = scoped_base(full, text) {
+                            module_path = base;
+                        } else if let Some(prefix) = scoped_prefix(full) {
                             module_path = prefix;
-                        } else {
-                            module_path = full.to_string();
                         }
                     }
+                }
+            }
+            if module_path == default_mod {
+                if let Some(first) = wildcard_imports.first() {
+                    module_path = first.clone();
                 }
             }
             calls.push(FunctionCall {
@@ -111,6 +122,20 @@ fn node_text<'a>(node: Node<'a>, source: &'a str) -> Option<&'a str> {
     source.get(range)
 }
 
+fn in_use_declaration(mut node: Node) -> bool {
+    for _ in 0..8 {
+        if node.kind() == "use_declaration" {
+            return true;
+        }
+        if let Some(parent) = node.parent() {
+            node = parent;
+        } else {
+            break;
+        }
+    }
+    false
+}
+
 fn impl_type_name(node: Node, source: &str) -> Option<String> {
     let mut cur = node;
     for _ in 0..8 {
@@ -132,11 +157,36 @@ fn scoped_prefix(text: &str) -> Option<String> {
     text.rsplitn(2, "::").nth(1).map(|s| s.to_string())
 }
 
-fn module_for_path(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("module")
-        .to_string()
+fn scoped_base(parent_text: &str, name: &str) -> Option<String> {
+    let mut parts: Vec<&str> = parent_text.split("::").filter(|s| !s.is_empty()).collect();
+    if parts.last().map(|p| *p == name).unwrap_or(false) {
+        parts.pop();
+    }
+    parts.pop().map(|s| s.to_string())
+}
+
+fn collect_wildcard_imports(root: Node, content: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "use_declaration" {
+            if let Some(arg) = node.child_by_field_name("argument") {
+                if arg.kind() == "use_wildcard" {
+                    if let Some(path_node) = node.child_by_field_name("path") {
+                        if let Some(text) = node_text(path_node, content) {
+                            out.push(text.trim().trim_end_matches("::").to_string());
+                        }
+                    }
+                }
+            }
+        }
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i as u32) {
+                stack.push(child);
+            }
+        }
+    }
+    out
 }
 
 pub fn find_function_span(pf: &ParsedFile, line: usize) -> Option<(usize, usize)> {

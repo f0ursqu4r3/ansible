@@ -1,7 +1,0 @@
-- [x] Text rendering fuzzy on lower (1080p) resolutions
-- [x] Jump to lib src functions (like raylib, for example)
-- [x] Jump to use/imports
-- [x] Jump to variable definitions
-- [x] Zooming when the cursor is on the right side of the screen does not "zoom to cursor"
-- [x] Sidebar should be able to be resized and collapsed
-- [x] Add a feature to toggle between application and code themes

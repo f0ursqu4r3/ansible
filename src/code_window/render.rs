@@ -400,15 +400,6 @@ pub fn hit_test_calls(
                         },
                     ));
                 }
-                if let Some(first) = defs.first() {
-                    return Some((
-                        first.clone(),
-                        CallOrigin {
-                            file: file.path.clone(),
-                            line: line_idx,
-                        },
-                    ));
-                }
             }
         }
     }

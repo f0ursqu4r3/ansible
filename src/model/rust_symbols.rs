@@ -110,12 +110,7 @@ impl<'a> SymbolVisitor<'a> {
             Some(pos) => pos,
             None => return,
         };
-        let mut target = self.resolve(name);
-        if target.is_none() {
-            if let Some(glob) = self.glob_imports.last() {
-                target = Some(glob.clone());
-            }
-        }
+        let target = self.resolve(name);
         self.refs.push(NameReference {
             name: name.to_string(),
             line,
