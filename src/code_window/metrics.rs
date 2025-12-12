@@ -22,13 +22,21 @@ pub fn metrics_for(project: &ProjectModel, win: &CodeWindow) -> Option<ContentMe
 
 pub fn content_metrics(pf: &ParsedFile, win: &CodeWindow) -> ContentMetrics {
     let visible_indices = win.visible_line_indices(pf);
-    let view_lines: Vec<&String> = visible_indices.iter().filter_map(|idx| pf.lines.get(*idx)).collect();
+    let mut view_lines = Vec::with_capacity(visible_indices.len());
+    let mut max_width = 0.0f32;
+    for idx in visible_indices {
+        if let Some(line) = pf.lines.get(idx) {
+            let mut width = crate::estimated_line_width(line);
+            if win.collapsed_fold_with_body(idx).is_some() {
+                width += crate::estimated_line_width(" ...");
+            }
+            max_width = max_width.max(width);
+            view_lines.push(line);
+        }
+    }
     let base_width = (win.size.x - CODE_X_OFFSET - RIGHT_TEXT_PAD).max(32.0);
     let base_height =
         (win.size.y - TITLE_BAR_HEIGHT - BREADCRUMB_HEIGHT - CONTENT_PADDING).max(LINE_HEIGHT);
-    let max_width = view_lines.iter().fold(0.0f32, |acc, line| {
-        acc.max(crate::estimated_line_width(line))
-    });
     let total_height = view_lines.len() as f32 * LINE_HEIGHT;
 
     let mut avail_width = base_width;

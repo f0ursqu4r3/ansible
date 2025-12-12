@@ -284,8 +284,20 @@ impl CodeWindow {
                 .any(|d| d.line == line && d.end_line > d.line)
     }
 
+    pub fn collapsed_fold_with_body(&self, line: usize) -> Option<&FoldRegion> {
+        self.folds
+            .iter()
+            .find(|f| f.start == line && f.collapsed && Self::fold_has_hidden_body(f))
+    }
+
+    fn fold_has_hidden_body(fold: &FoldRegion) -> bool {
+        fold.end.saturating_sub(fold.start) > 1
+    }
+
     fn is_line_hidden(&self, line: usize) -> bool {
-        self.folds.iter().any(|f| f.collapsed && line > f.start && line <= f.end)
+        self.folds
+            .iter()
+            .any(|f| f.collapsed && line > f.start && line < f.end)
     }
 
     pub fn view_range(&self, pf: &ParsedFile) -> (usize, usize) {

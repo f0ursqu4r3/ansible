@@ -7,7 +7,7 @@ use std::time::Instant;
 use raylib::prelude::*;
 use serde_json;
 
-use crate::code_window::{self, CallOrigin, CodeViewKind, CodeWindow};
+use crate::code_window::{self, CallOrigin, CodeViewKind, CodeWindow, FoldRegion};
 use crate::constants::{
     LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TITLE_BAR_HEIGHT,
 };
@@ -314,6 +314,7 @@ impl AppState {
             drag_start: Vector2 { x: 0.0, y: 0.0 },
             metrics_cache: RefCell::new(None),
         };
+        self.seed_folds_from_peers(&mut win);
         code_window::clamp_window_scroll(&self.project, &mut win);
         self.refresh_window_metadata(&mut win);
         self.next_window_id += 1;
@@ -492,6 +493,7 @@ impl AppState {
             drag_start: Vector2 { x: 0.0, y: 0.0 },
             metrics_cache: RefCell::new(None),
         };
+        self.seed_folds_from_peers(&mut win);
         code_window::clamp_window_scroll(&self.project, &mut win);
         self.refresh_window_metadata(&mut win);
         self.next_window_id += 1;
@@ -513,6 +515,64 @@ impl AppState {
             win.def_refs.clear();
             win.call_refs.clear();
             win.clear_metrics_cache();
+        }
+    }
+
+    fn seed_folds_from_peers(&self, win: &mut CodeWindow) {
+        let Some(pf) = self.project.parsed.get(&win.file) else {
+            return;
+        };
+        let (view_start, view_end) = win.view_range(pf);
+        for peer in self.windows.iter().filter(|w| w.file == win.file) {
+            for fold in &peer.folds {
+                if fold.start < view_start || fold.start > view_end {
+                    continue;
+                }
+                if win.folds.iter().any(|f| f.start == fold.start) {
+                    continue;
+                }
+                win.folds.push(fold.clone());
+            }
+        }
+        if !win.folds.is_empty() {
+            win.fold_version = win.fold_version.wrapping_add(1);
+        }
+    }
+
+    pub(crate) fn sync_folds_to_siblings(
+        &mut self,
+        source_idx: usize,
+        file: &PathBuf,
+        folds: &[FoldRegion],
+    ) {
+        let Some(pf) = self.project.parsed.get(file) else {
+            return;
+        };
+        for (idx, win) in self.windows.iter_mut().enumerate() {
+            if idx == source_idx || win.file != *file {
+                continue;
+            }
+            let (view_start, view_end) = win.view_range(pf);
+            let mut changed = false;
+            for fold in folds {
+                if fold.start < view_start || fold.start > view_end {
+                    continue;
+                }
+                if let Some(existing) = win.folds.iter_mut().find(|f| f.start == fold.start) {
+                    if existing.end != fold.end || existing.collapsed != fold.collapsed {
+                        *existing = fold.clone();
+                        changed = true;
+                    }
+                } else {
+                    win.folds.push(fold.clone());
+                    changed = true;
+                }
+            }
+            if changed {
+                win.fold_version = win.fold_version.wrapping_add(1);
+                win.clear_metrics_cache();
+                code_window::clamp_window_scroll(&self.project, win);
+            }
         }
     }
 

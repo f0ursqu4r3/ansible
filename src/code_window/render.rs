@@ -173,6 +173,18 @@ fn draw_code(
             let calls: Vec<&FunctionCall> = file.calls_on_line(line_idx).collect();
             let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
             draw_segments(&mut code_scope, font, text_start_x, y, line, &segments);
+            if win.collapsed_fold_with_body(line_idx).is_some() {
+                let ellipsis = " ...";
+                let ellipsis_x = text_start_x + font.measure_width(line, FONT_SIZE, 0.0) + 6.0;
+                font.draw_text_ex(
+                    &mut code_scope,
+                    ellipsis,
+                    Vector2::new(ellipsis_x, y),
+                    FONT_SIZE,
+                    0.0,
+                    palette.comment,
+                );
+            }
             y += LINE_HEIGHT;
         }
     }
@@ -462,15 +474,18 @@ pub fn hit_test_calls(
         );
         if crate::point_in_rect(mouse, rect) {
             if let Some(defs) = project.defs.get(&call.name) {
-                if let Some(exact) = defs.iter().find(|d| d.module_path == call.module_path) {
-                    return Some((
-                        exact.clone(),
-                        CallOrigin {
-                            file: file.path.clone(),
-                            line: line_idx,
-                        },
-                    ));
+                let mut target = defs.iter().find(|d| d.module_path == call.module_path);
+                if target.is_none() {
+                    target = defs.iter().find(|d| d.file == file.path);
                 }
+                let def = target.or_else(|| defs.first()).cloned()?;
+                return Some((
+                    def,
+                    CallOrigin {
+                        file: file.path.clone(),
+                        line: line_idx,
+                    },
+                ));
             }
         }
     }

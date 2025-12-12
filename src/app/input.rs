@@ -376,13 +376,25 @@ impl AppState {
                             self.open_definition(def, origin);
                         }
                         WindowAction::ToggleFold { line } => {
-                            if let Some(win) = self.windows.last_mut() {
-                                if let Some(pf) = self.project.parsed.get(&win.file) {
+                            let mut sync = None;
+                            if let Some(active_idx) = self.windows.len().checked_sub(1) {
+                                if let Some(pf) =
+                                    self.project.parsed.get(&self.windows[active_idx].file)
+                                {
+                                    let win = &mut self.windows[active_idx];
                                     if win.toggle_fold(pf, line) {
                                         code_window::clamp_window_scroll(&self.project, win);
                                         win.clear_metrics_cache();
+                                        sync = Some((
+                                            active_idx,
+                                            win.file.clone(),
+                                            win.folds.clone(),
+                                        ));
                                     }
                                 }
+                            }
+                            if let Some((idx, file, folds)) = sync {
+                                self.sync_folds_to_siblings(idx, &file, &folds);
                             }
                         }
                         WindowAction::StartDrag(offset) => {
