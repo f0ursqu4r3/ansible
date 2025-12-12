@@ -70,7 +70,7 @@ impl CodeWindow {
         };
         icons.render(
             d,
-            Icon::Close,
+            Icon::XMark,
             Vector2::new(close_rect.x, close_rect.y),
             palette.close,
         );
@@ -408,6 +408,64 @@ pub fn hit_test_calls(
                             line: line_idx,
                         },
                     ));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn hit_test_names(
+    font: &AppFont,
+    file: &ParsedFile,
+    win: &CodeWindow,
+    mouse: Vector2,
+    project: &ProjectModel,
+) -> Option<DefinitionLocation> {
+    if file.name_refs.is_empty() {
+        return None;
+    }
+    let content_rect = win.content_rect_at(Vector2::new(0.0, 0.0));
+    let (view_start, view_lines) = win.view_lines(file);
+    let content_top = content_rect.y + BREADCRUMB_HEIGHT;
+    let local_y = mouse.y - content_top + win.scroll;
+    if local_y < 0.0 {
+        return None;
+    }
+    let line_idx = (local_y / LINE_HEIGHT).floor() as usize;
+    if line_idx >= view_lines.len() {
+        return None;
+    }
+    let line_idx = view_start + line_idx;
+    let local_idx = line_idx.saturating_sub(view_start);
+    let line = match file.lines.get(line_idx) {
+        Some(l) => l,
+        None => return None,
+    };
+
+    for name_ref in file.name_refs.iter().filter(|r| r.line == line_idx) {
+        if name_ref.col + name_ref.len > line.len() {
+            continue;
+        }
+        let rect = token_rect(
+            font,
+            line,
+            name_ref.col,
+            name_ref.len,
+            content_rect.x + CODE_X_OFFSET - win.scroll_x,
+            content_top + (local_idx as f32 * LINE_HEIGHT) - win.scroll,
+        );
+        if crate::point_in_rect(mouse, rect) {
+            if let Some(target) = &name_ref.target {
+                return Some(target.clone());
+            }
+            if let Some(defs) = project.defs.get(&name_ref.name) {
+                if let Some(local) = defs.iter().find(|d| d.file == file.path) {
+                    return Some(local.clone());
+                }
+                if let Some(first) = defs.first() {
+                    return Some(first.clone());
                 }
             }
         }

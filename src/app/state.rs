@@ -1,23 +1,23 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
-use std::time::Instant;
 use std::time::Duration;
+use std::time::Instant;
 
 use raylib::prelude::*;
 use serde_json;
 
 use crate::code_window::{self, CallOrigin, CodeViewKind, CodeWindow};
-use crate::constants::{LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_WIDTH, TITLE_BAR_HEIGHT};
+use crate::constants::{
+    LAYOUT_FILE, LINE_HEIGHT, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TITLE_BAR_HEIGHT,
+};
 use crate::helpers::matches_view;
 use crate::icons::Icons;
 use crate::model::{DefinitionLocation, ProjectModel, find_function_span};
 use crate::sidebar::{SidebarAction, SidebarState};
 use crate::theme::Palette;
 
-use super::types::{
-    CallLink, SavedCallOrigin, SavedLayout, SavedViewKind, SavedWindow,
-};
+use super::types::{CallLink, SavedCallOrigin, SavedLayout, SavedViewKind, SavedWindow, ThemeMode};
 
 pub struct AppState {
     pub project: ProjectModel,
@@ -25,6 +25,9 @@ pub struct AppState {
     pub next_window_id: usize,
     pub sidebar: SidebarState,
     pub palette: Palette,
+    pub app_palette: Palette,
+    pub code_palette: Palette,
+    pub theme_mode: ThemeMode,
     pub(crate) icons: Icons,
     pub(crate) pan: Vector2,
     pub(crate) pan_dragging: bool,
@@ -42,6 +45,9 @@ pub struct AppState {
     pub(crate) last_reload: Instant,
     pub(crate) reload_rx: Option<Receiver<anyhow::Result<ProjectModel>>>,
     pub(crate) reload_inflight: bool,
+    pub(crate) sidebar_resizing: bool,
+    pub(crate) sidebar_resize_anchor: f32,
+    pub(crate) sidebar_resize_start: f32,
 }
 
 impl AppState {
@@ -49,15 +55,24 @@ impl AppState {
         project: ProjectModel,
         rl: &mut RaylibHandle,
         thread: &RaylibThread,
-        palette: Palette,
+        app_palette: Palette,
+        code_palette: Palette,
+        theme_mode: ThemeMode,
     ) -> Self {
         let icons = Icons::load(rl, thread, 16);
+        let palette = match theme_mode {
+            ThemeMode::Application => app_palette,
+            ThemeMode::Code => code_palette,
+        };
         let mut state = Self {
             project,
             windows: Vec::new(),
             next_window_id: 1,
             sidebar: SidebarState::with_icons(rl, thread),
             palette,
+            app_palette,
+            code_palette,
+            theme_mode,
             icons,
             pan: Vector2::new(0.0, 0.0),
             pan_dragging: false,
@@ -75,6 +90,9 @@ impl AppState {
             last_reload: Instant::now(),
             reload_rx: None,
             reload_inflight: false,
+            sidebar_resizing: false,
+            sidebar_resize_anchor: 0.0,
+            sidebar_resize_start: 0.0,
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -87,6 +105,10 @@ impl AppState {
 
     fn layout_path(&self) -> PathBuf {
         self.project.root.join(LAYOUT_FILE)
+    }
+
+    pub fn sidebar_width(&self) -> f32 {
+        self.sidebar.current_width()
     }
 
     fn single_fn_title(&self, file: &PathBuf, start: usize) -> Option<String> {
@@ -112,6 +134,14 @@ impl AppState {
                 .into_iter()
                 .map(PathBuf::from)
                 .collect();
+            if let Some(width) = layout.sidebar_width {
+                self.sidebar.width = width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+            }
+            self.sidebar.collapsed = layout.sidebar_hidden;
+            if let Some(mode) = layout.theme_mode {
+                self.theme_mode = mode;
+                self.apply_theme_mode();
+            }
             for saved in layout.windows {
                 let file = self.project.root.join(&saved.file);
                 if !self.project.parsed.contains_key(&file) {
@@ -208,6 +238,9 @@ impl AppState {
             windows,
             sidebar_scroll: self.sidebar.scroll,
             sidebar_collapsed,
+            sidebar_width: Some(self.sidebar.width),
+            sidebar_hidden: self.sidebar.collapsed,
+            theme_mode: Some(self.theme_mode),
         };
         let path = self.layout_path();
         let text = serde_json::to_string_pretty(&layout)?;
@@ -229,7 +262,7 @@ impl AppState {
         }
 
         let pos = Vector2::new(
-            SIDEBAR_WIDTH + 24.0 + (self.windows.len() as f32 * 18.0),
+            self.sidebar_width() + 24.0 + (self.windows.len() as f32 * 18.0),
             40.0 + (self.windows.len() as f32 * 18.0),
         );
         let mut scroll = 0.0;
@@ -278,10 +311,31 @@ impl AppState {
         }
     }
 
+    pub fn apply_theme_mode(&mut self) {
+        let palette = match self.theme_mode {
+            ThemeMode::Application => self.app_palette,
+            ThemeMode::Code => self.code_palette,
+        };
+        self.set_palette(palette);
+    }
+
     pub fn handle_sidebar_action(&mut self, action: SidebarAction) {
         match action {
             SidebarAction::OpenFile { path, line } => self.open_file(path, line),
             SidebarAction::ToggleDir => {}
+            SidebarAction::ToggleCollapse => {
+                self.sidebar.collapsed = !self.sidebar.collapsed;
+                self.sidebar_resizing = false;
+                self.sidebar.search_focused = false;
+                self.sidebar.width = self
+                    .sidebar
+                    .width
+                    .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+            }
+            SidebarAction::ToggleTheme => {
+                self.theme_mode = self.theme_mode.toggle();
+                self.apply_theme_mode();
+            }
         }
     }
 
@@ -354,7 +408,7 @@ impl AppState {
         }
 
         let pos = Vector2::new(
-            SIDEBAR_WIDTH + 24.0 + (self.windows.len() as f32 * 18.0),
+            self.sidebar_width() + 24.0 + (self.windows.len() as f32 * 18.0),
             40.0 + (self.windows.len() as f32 * 18.0),
         );
         let mut scroll = 0.0;

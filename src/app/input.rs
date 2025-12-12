@@ -8,7 +8,7 @@ use crate::code_window::{
     CallOrigin, CodeViewKind, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING, SCROLLBAR_THICKNESS,
     minimap_geometry,
 };
-use crate::constants::{CODE_X_OFFSET, LINE_HEIGHT, SIDEBAR_WIDTH};
+use crate::constants::{CODE_X_OFFSET, LINE_HEIGHT};
 use crate::{AppFont, point_in_rect};
 
 use super::AppState;
@@ -39,9 +39,32 @@ impl AppState {
             mouse.y / self.zoom - self.pan.y,
         );
         self.last_mouse_world = Some(world_mouse);
+        let sidebar_width = self.sidebar_width();
 
         if meta_close_pressed {
             self.windows.pop();
+            return;
+        }
+
+        if left_pressed && !self.sidebar.collapsed {
+            let gutter = crate::constants::SIDEBAR_RESIZE_GUTTER;
+            let near_edge = mouse.x >= sidebar_width - gutter && mouse.x <= sidebar_width + gutter;
+            if near_edge {
+                self.sidebar_resizing = true;
+                self.sidebar_resize_anchor = mouse.x;
+                self.sidebar_resize_start = self.sidebar.width;
+            }
+        }
+        if !left_down {
+            self.sidebar_resizing = false;
+        }
+        if self.sidebar_resizing {
+            let delta = mouse.x - self.sidebar_resize_anchor;
+            let new_width = (self.sidebar_resize_start + delta).clamp(
+                crate::constants::SIDEBAR_MIN_WIDTH,
+                crate::constants::SIDEBAR_MAX_WIDTH,
+            );
+            self.sidebar.width = new_width;
             return;
         }
 
@@ -91,12 +114,12 @@ impl AppState {
             let new_zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
             if (new_zoom - self.zoom).abs() > f32::EPSILON {
                 let world_anchor = Vector2::new(
-                    (mouse.x - SIDEBAR_WIDTH) / self.zoom - self.pan.x,
+                    mouse.x / self.zoom - self.pan.x,
                     mouse.y / self.zoom - self.pan.y,
                 );
                 self.zoom = new_zoom;
                 self.pan = Vector2::new(
-                    (mouse.x - SIDEBAR_WIDTH) / self.zoom - world_anchor.x,
+                    mouse.x / self.zoom - world_anchor.x,
                     mouse.y / self.zoom - world_anchor.y,
                 );
                 world_mouse = Vector2::new(
@@ -435,14 +458,17 @@ impl AppState {
                 }
             }
 
-            if !handled && point_in_rect(mouse, self.sidebar.search_rect()) {
+            if !handled
+                && !self.sidebar.collapsed
+                && point_in_rect(mouse, self.sidebar.search_rect())
+            {
                 self.sidebar.search_focused = true;
             } else if !handled {
                 self.sidebar.search_focused = false;
             }
         }
 
-        if self.sidebar.search_focused {
+        if self.sidebar.search_focused && !self.sidebar.collapsed {
             if backspace {
                 self.sidebar.search_query.pop();
             }
@@ -631,6 +657,11 @@ impl AppState {
                     def,
                     origin: Some(origin),
                 };
+            }
+            if let Some(def) =
+                code_window::hit_test_names(font, pf, win, world_mouse, &self.project)
+            {
+                return WindowAction::OpenDefinition { def, origin: None };
             }
         }
 

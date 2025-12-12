@@ -3,7 +3,7 @@ use crate::model::{ParsedFile, ProjectModel};
 use raylib::prelude::Rectangle;
 
 use super::types::{
-    CodeWindow, ContentMetrics, CONTENT_PADDING, RIGHT_TEXT_PAD, SCROLLBAR_PADDING,
+    CONTENT_PADDING, CodeWindow, ContentMetrics, RIGHT_TEXT_PAD, SCROLLBAR_PADDING,
     SCROLLBAR_THICKNESS,
 };
 

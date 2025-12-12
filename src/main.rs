@@ -15,6 +15,7 @@ mod sidebar;
 mod theme;
 
 use app::AppState;
+use app::ThemeMode;
 use constants::*;
 use theme::{default_palette, load_tmtheme_palette};
 
@@ -42,9 +43,10 @@ impl AppFont {
         color: Color,
     ) {
         let t = text.as_ref();
+        let snapped = Vector2::new(pos.x.round(), pos.y.round());
         match self {
-            AppFont::Owned(f) => d.draw_text_ex(f, t, pos, size, spacing, color),
-            AppFont::Default(f) => d.draw_text_ex(f, t, pos, size, spacing, color),
+            AppFont::Owned(f) => d.draw_text_ex(f, t, snapped, size, spacing, color),
+            AppFont::Default(f) => d.draw_text_ex(f, t, snapped, size, spacing, color),
         }
     }
 
@@ -56,7 +58,7 @@ impl AppFont {
     }
 
     fn apply_filter(&self, thread: &RaylibThread) {
-        let filter = TextureFilter::TEXTURE_FILTER_BILINEAR;
+        let filter = TextureFilter::TEXTURE_FILTER_POINT;
         match self {
             AppFont::Owned(f) => {
                 f.texture().set_texture_filter(thread, filter);
@@ -85,8 +87,20 @@ fn main() -> Result<()> {
     rl.set_target_fps(60);
     let font = load_monospace_font(&mut rl, &thread);
 
-    let palette = load_tmtheme_palette().unwrap_or_else(default_palette);
-    let mut app = AppState::new(project, &mut rl, &thread, palette);
+    let app_palette = default_palette();
+    let code_palette_opt = load_tmtheme_palette();
+    let (code_palette, theme_mode) = match code_palette_opt {
+        Some(pal) => (pal, ThemeMode::Code),
+        None => (app_palette, ThemeMode::Application),
+    };
+    let mut app = AppState::new(
+        project,
+        &mut rl,
+        &thread,
+        app_palette,
+        code_palette,
+        theme_mode,
+    );
 
     let (fs_tx, fs_rx) = channel();
     let mut _watcher = notify::recommended_watcher(move |res| {
@@ -99,7 +113,10 @@ fn main() -> Result<()> {
             if let Ok(evt) = event {
                 use notify::event::EventKind;
                 match evt.kind {
-                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) | EventKind::Any => {
+                    EventKind::Modify(_)
+                    | EventKind::Create(_)
+                    | EventKind::Remove(_)
+                    | EventKind::Any => {
                         app.mark_project_dirty();
                     }
                     _ => {}
@@ -165,9 +182,10 @@ pub fn token_rect(
     let token = &line[start..start + len];
     let width_before = font.measure_width(before, FONT_SIZE, 0.0);
     let width_token = font.measure_width(token, FONT_SIZE, 0.0);
+    let x = (base_x + width_before).round();
     Rectangle {
-        x: base_x + width_before,
-        y,
+        x,
+        y: y.round(),
         width: width_token,
         height: LINE_HEIGHT,
     }

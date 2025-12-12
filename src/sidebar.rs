@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use raylib::prelude::*;
 
-use crate::constants::{FONT_SIZE, SIDEBAR_ROW_H, SIDEBAR_WIDTH};
+use crate::constants::{FONT_SIZE, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_ROW_H, SIDEBAR_WIDTH};
 use crate::icons::{Icon, Icons};
 use crate::model::{DefinitionLocation, ProjectModel};
 use crate::theme::Palette;
@@ -24,6 +24,8 @@ struct TreeEntry {
 pub enum SidebarAction {
     OpenFile { path: PathBuf, line: Option<usize> },
     ToggleDir,
+    ToggleCollapse,
+    ToggleTheme,
 }
 
 pub struct SidebarState {
@@ -31,6 +33,8 @@ pub struct SidebarState {
     pub search_focused: bool,
     pub scroll: f32,
     pub collapsed_dirs: HashSet<PathBuf>,
+    pub width: f32,
+    pub collapsed: bool,
     icons: Icons,
     entries: Vec<TreeEntry>,
     entries_version: usize,
@@ -44,6 +48,8 @@ impl SidebarState {
             search_focused: false,
             scroll: 0.0,
             collapsed_dirs: HashSet::new(),
+            width: SIDEBAR_WIDTH,
+            collapsed: false,
             icons: Icons::load(rl, thread, 16),
             entries: Vec::new(),
             entries_version: 0,
@@ -55,11 +61,20 @@ impl SidebarState {
         self.entries_dirty = true;
     }
 
+    pub fn current_width(&self) -> f32 {
+        if self.collapsed {
+            SIDEBAR_COLLAPSED_WIDTH
+        } else {
+            self.width
+        }
+    }
+
     pub fn search_rect(&self) -> Rectangle {
+        let w = self.current_width();
         Rectangle {
             x: 12.0,
             y: 40.0,
-            width: SIDEBAR_WIDTH - 24.0,
+            width: w - 24.0,
             height: 26.0,
         }
     }
@@ -83,11 +98,32 @@ impl SidebarState {
     }
 
     fn entry_rect(&self, entry: &TreeEntry, y: f32) -> Rectangle {
+        let w = self.current_width();
         Rectangle {
             x: 10.0 + (entry.depth as f32 * 14.0),
             y,
-            width: SIDEBAR_WIDTH - 20.0 - (entry.depth as f32 * 14.0),
+            width: w - 20.0 - (entry.depth as f32 * 14.0),
             height: SIDEBAR_ROW_H,
+        }
+    }
+
+    fn toggle_rect(&self) -> Rectangle {
+        let w = self.current_width();
+        Rectangle {
+            x: (w - 24.0).max(2.0),
+            y: 8.0,
+            width: 16.0,
+            height: 16.0,
+        }
+    }
+
+    fn theme_rect(&self) -> Rectangle {
+        let toggle = self.toggle_rect();
+        Rectangle {
+            x: (toggle.x - 52.0).max(4.0),
+            y: toggle.y,
+            width: 44.0,
+            height: toggle.height,
         }
     }
 
@@ -124,11 +160,7 @@ impl SidebarState {
         text.contains(query)
     }
 
-    fn visible_entries<'a>(
-        &'a self,
-        entries: &'a [TreeEntry],
-        query: &str,
-    ) -> Vec<&'a TreeEntry> {
+    fn visible_entries<'a>(&'a self, entries: &'a [TreeEntry], query: &str) -> Vec<&'a TreeEntry> {
         let mut out = Vec::new();
         let mut skip_depth: Option<usize> = None;
         for entry in entries {
@@ -233,7 +265,8 @@ impl SidebarState {
         defs: &HashMap<String, Vec<DefinitionLocation>>,
         sidebar_height: f32,
     ) -> bool {
-        if mouse.x > SIDEBAR_WIDTH {
+        let width = self.current_width();
+        if self.collapsed || mouse.x > width {
             return false;
         }
         let query = self.search_query.to_lowercase();
@@ -257,8 +290,20 @@ impl SidebarState {
         project: &ProjectModel,
         defs: &HashMap<String, Vec<DefinitionLocation>>,
     ) -> Option<SidebarAction> {
-        if mouse.x > SIDEBAR_WIDTH {
+        let width = self.current_width();
+        if mouse.x > width {
             return None;
+        }
+        let toggle_rect = self.toggle_rect();
+        if point_in_rect(mouse, toggle_rect) {
+            return Some(SidebarAction::ToggleCollapse);
+        }
+        if self.collapsed {
+            return Some(SidebarAction::ToggleCollapse);
+        }
+        let theme_rect = self.theme_rect();
+        if point_in_rect(mouse, theme_rect) {
+            return Some(SidebarAction::ToggleTheme);
         }
         let query = self.search_query.to_lowercase();
         self.ensure_entries(project);
@@ -291,7 +336,7 @@ impl SidebarState {
                 let rect = Rectangle {
                     x: 10.0,
                     y,
-                    width: SIDEBAR_WIDTH - 20.0,
+                    width: width - 20.0,
                     height: 20.0,
                 };
                 if point_in_rect(mouse, rect) {
@@ -316,13 +361,58 @@ impl SidebarState {
         project: &ProjectModel,
         defs: &HashMap<String, Vec<DefinitionLocation>>,
         palette: &Palette,
+        theme_label: &str,
     ) {
+        let width = self.current_width();
+        d.draw_rectangle(0, 0, width as i32, d.get_screen_height(), palette.sidebar);
+        let toggle_rect = self.toggle_rect();
+        let toggle_icon = if self.collapsed {
+            Icon::PanelLeftOpen
+        } else {
+            Icon::PanelLeftClose
+        };
+        self.icons.render(
+            d,
+            toggle_icon,
+            Vector2::new(toggle_rect.x, toggle_rect.y),
+            palette.text,
+        );
+
+        if self.collapsed {
+            d.draw_line(
+                width as i32,
+                0,
+                width as i32,
+                d.get_screen_height(),
+                palette.breadcrumb,
+            );
+            return;
+        }
+
+        let theme_rect = self.theme_rect();
         d.draw_rectangle(
-            0,
-            0,
-            SIDEBAR_WIDTH as i32,
-            d.get_screen_height(),
-            palette.sidebar,
+            theme_rect.x as i32,
+            theme_rect.y as i32,
+            theme_rect.width as i32,
+            theme_rect.height as i32,
+            palette.title,
+        );
+        if point_in_rect(mouse, theme_rect) {
+            d.draw_rectangle_lines(
+                theme_rect.x as i32,
+                theme_rect.y as i32,
+                theme_rect.width as i32,
+                theme_rect.height as i32,
+                palette.project,
+            );
+        }
+        font.draw_text_ex(
+            d,
+            theme_label,
+            Vector2::new(theme_rect.x + 4.0, theme_rect.y + 1.0),
+            FONT_SIZE - 2.0,
+            0.0,
+            palette.text,
         );
         font.draw_text_ex(
             d,
@@ -386,8 +476,7 @@ impl SidebarState {
 
         let scissor_height = visible_height.max(0.0) as i32;
         {
-            let mut scoped =
-                d.begin_scissor_mode(0, start_y as i32, SIDEBAR_WIDTH as i32, scissor_height);
+            let mut scoped = d.begin_scissor_mode(0, start_y as i32, width as i32, scissor_height);
             for entry in filtered {
                 let rect = self.entry_rect(&entry, visible_y);
                 if rect.y + rect.height < start_y {
@@ -466,7 +555,7 @@ impl SidebarState {
                     let rect = Rectangle {
                         x: 10.0,
                         y: y_matches,
-                        width: SIDEBAR_WIDTH - 20.0,
+                        width: width - 20.0,
                         height: 20.0,
                     };
                     if point_in_rect(mouse, rect) {
@@ -508,7 +597,7 @@ impl SidebarState {
         }
 
         if content_height > visible_height + f32::EPSILON && visible_height > 0.0 {
-            let track_x = SIDEBAR_WIDTH - SCROLLBAR_WIDTH - 4.0;
+            let track_x = width - SCROLLBAR_WIDTH - 4.0;
             let track_y = start_y;
             let track_h = visible_height;
             d.draw_rectangle(
@@ -531,9 +620,9 @@ impl SidebarState {
             );
         }
         d.draw_line(
-            SIDEBAR_WIDTH as i32,
+            width as i32,
             0,
-            SIDEBAR_WIDTH as i32,
+            width as i32,
             d.get_screen_height(),
             palette.breadcrumb,
         );

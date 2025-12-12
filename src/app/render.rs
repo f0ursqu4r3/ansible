@@ -1,17 +1,16 @@
 use raylib::prelude::*;
 
+use crate::AppFont;
 use crate::code_window;
 use crate::code_window::CodeViewKind;
-use crate::constants::SIDEBAR_WIDTH;
 use crate::point_in_rect;
-use crate::AppFont;
 
+use super::AppState;
 use super::types::{
-    MinimapContext, MINIMAP_BTN_GAP, MINIMAP_BTN_H, MINIMAP_BTN_W, MINIMAP_H, MINIMAP_MARGIN,
-    MINIMAP_PAD, MINIMAP_W,
+    MINIMAP_BTN_GAP, MINIMAP_BTN_H, MINIMAP_BTN_W, MINIMAP_H, MINIMAP_MARGIN, MINIMAP_PAD,
+    MINIMAP_W, MinimapContext,
 };
 use super::util::min_distance_to_cubic;
-use super::AppState;
 
 impl AppState {
     pub fn draw(&mut self, d: &mut RaylibDrawHandle, font: &AppFont, mouse: Vector2) {
@@ -53,13 +52,11 @@ impl AppState {
                 }
                 if hover_cursor.is_none() {
                     if !over_window {
-                        if self
-                            .call_links
-                            .iter()
-                            .any(|l| l.hovered
+                        if self.call_links.iter().any(|l| {
+                            l.hovered
                                 && min_distance_to_cubic(&l.points, world_mouse)
-                                    <= link_hover_tolerance)
-                        {
+                                    <= link_hover_tolerance
+                        }) {
                             hover_cursor = Some(MouseCursor::MOUSE_CURSOR_POINTING_HAND);
                         }
                     }
@@ -90,6 +87,13 @@ impl AppState {
                 );
             }
         }
+        if hover_cursor.is_none() && !self.sidebar.collapsed {
+            let sidebar_w = self.sidebar_width();
+            let gutter = crate::constants::SIDEBAR_RESIZE_GUTTER;
+            if mouse.x >= sidebar_w - gutter && mouse.x <= sidebar_w + gutter {
+                hover_cursor = Some(MouseCursor::MOUSE_CURSOR_RESIZE_EW);
+            }
+        }
         d.set_mouse_cursor(hover_cursor.unwrap_or(MouseCursor::MOUSE_CURSOR_DEFAULT));
         if let Some(ctx) =
             self.minimap_context(d.get_screen_width() as f32, d.get_screen_height() as f32)
@@ -103,6 +107,7 @@ impl AppState {
             &self.project,
             &self.project.defs,
             &self.palette,
+            self.theme_mode.label(),
         );
     }
 
@@ -185,7 +190,8 @@ impl AppState {
 
                 let caller_content = caller_win.content_rect_at(Vector2::new(0.0, 0.0));
                 let callee_content = fn_win.content_rect_at(Vector2::new(0.0, 0.0));
-                let start_pt = Vector2::new(caller_content.x + caller_content.width + 6.0, raw_start.y);
+                let start_pt =
+                    Vector2::new(caller_content.x + caller_content.width + 6.0, raw_start.y);
                 let end_pt = Vector2::new(callee_content.x - 6.0, raw_end.y);
 
                 let dx = (end_pt.x - start_pt.x).abs().max(40.0);
@@ -194,7 +200,8 @@ impl AppState {
                 let c2 = Vector2::new(end_pt.x - handle, end_pt.y);
                 let points = [start_pt, c1, c2, end_pt];
                 // Early out with a cheap AABB check before the expensive curve distance.
-                let (mut min_x, mut max_x, mut min_y, mut max_y) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+                let (mut min_x, mut max_x, mut min_y, mut max_y) =
+                    (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
                 for p in points {
                     min_x = min_x.min(p.x);
                     max_x = max_x.max(p.x);
@@ -292,7 +299,10 @@ impl AppState {
         })
     }
 
-    pub(crate) fn minimap_buttons(&self, ctx: &MinimapContext) -> (Rectangle, Rectangle, Rectangle) {
+    pub(crate) fn minimap_buttons(
+        &self,
+        ctx: &MinimapContext,
+    ) -> (Rectangle, Rectangle, Rectangle) {
         let y = ctx.rect.y + ctx.rect.height - MINIMAP_BTN_H - MINIMAP_PAD;
         let x0 = ctx.rect.x + MINIMAP_PAD;
         let b0 = Rectangle {
@@ -323,9 +333,7 @@ impl AppState {
         };
         // Keep the target inside the minimap bounds so dragging near the edge
         // doesn't jump the camera past the content.
-        world.x = world
-            .x
-            .clamp(ctx.bounds.x, ctx.bounds.x + ctx.bounds.width);
+        world.x = world.x.clamp(ctx.bounds.x, ctx.bounds.x + ctx.bounds.width);
         world.y = world
             .y
             .clamp(ctx.bounds.y, ctx.bounds.y + ctx.bounds.height);
@@ -334,9 +342,10 @@ impl AppState {
 
     pub(crate) fn center_view_on(&mut self, world: Vector2, screen_w: f32, screen_h: f32) {
         // Center relative to the visible canvas (sidebar area is occluded).
-        let canvas_w = (screen_w - SIDEBAR_WIDTH).max(0.0);
+        let sidebar_w = self.sidebar_width();
+        let canvas_w = (screen_w - sidebar_w).max(0.0);
         let half_canvas = canvas_w * 0.5 / self.zoom;
-        let sidebar_offset = SIDEBAR_WIDTH / self.zoom;
+        let sidebar_offset = sidebar_w / self.zoom;
         self.pan = Vector2::new(
             sidebar_offset + half_canvas - world.x,
             screen_h / (2.0 * self.zoom) - world.y,
@@ -392,9 +401,10 @@ impl AppState {
             );
         }
 
-        let canvas_w = (d.get_screen_width() as f32 - SIDEBAR_WIDTH).max(0.0);
+        let sidebar_w = self.sidebar_width();
+        let canvas_w = (d.get_screen_width() as f32 - sidebar_w).max(0.0);
         let view_rect = Rectangle {
-            x: -self.pan.x + SIDEBAR_WIDTH / self.zoom,
+            x: -self.pan.x + sidebar_w / self.zoom,
             y: -self.pan.y,
             width: canvas_w / self.zoom,
             height: d.get_screen_height() as f32 / self.zoom,

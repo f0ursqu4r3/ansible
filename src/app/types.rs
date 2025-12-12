@@ -43,6 +43,12 @@ pub struct SavedLayout {
     pub sidebar_scroll: f32,
     #[serde(default)]
     pub sidebar_collapsed: Vec<String>,
+    #[serde(default)]
+    pub sidebar_width: Option<f32>,
+    #[serde(default)]
+    pub sidebar_hidden: bool,
+    #[serde(default)]
+    pub theme_mode: Option<ThemeMode>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -60,6 +66,28 @@ pub enum SavedViewKind {
 pub struct SavedCallOrigin {
     pub file: String,
     pub line: usize,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ThemeMode {
+    Application,
+    Code,
+}
+
+impl ThemeMode {
+    pub fn toggle(self) -> Self {
+        match self {
+            ThemeMode::Application => ThemeMode::Code,
+            ThemeMode::Code => ThemeMode::Application,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ThemeMode::Application => "App",
+            ThemeMode::Code => "Code",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

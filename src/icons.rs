@@ -27,8 +27,10 @@ pub enum Icon {
     MoveHorizontal,
     MoveVertical,
     Move,
+    PanelLeftClose,
+    PanelLeftOpen,
     Pointer,
-    Close,
+    XMark,
     ZoomIn,
     ZoomOut,
 }
@@ -40,6 +42,7 @@ pub struct Icons {
 impl Icons {
     pub fn load(rl: &mut RaylibHandle, thread: &RaylibThread, size: u32) -> Self {
         let mut svgs = HashMap::new();
+        // TODO: automate this to load all SVGs in a directory and generate the Icon enum variants.
         svgs.insert(
             Icon::ArrowUp,
             load_svg_texture(rl, thread, "data/icons/arrow-up.svg", size),
@@ -113,11 +116,19 @@ impl Icons {
             load_svg_texture(rl, thread, "data/icons/move.svg", size),
         );
         svgs.insert(
+            Icon::PanelLeftClose,
+            load_svg_texture(rl, thread, "data/icons/panel-left-close.svg", size),
+        );
+        svgs.insert(
+            Icon::PanelLeftOpen,
+            load_svg_texture(rl, thread, "data/icons/panel-left-open.svg", size),
+        );
+        svgs.insert(
             Icon::Pointer,
             load_svg_texture(rl, thread, "data/icons/pointer.svg", size),
         );
         svgs.insert(
-            Icon::Close,
+            Icon::XMark,
             load_svg_texture(rl, thread, "data/icons/x-mark.svg", size),
         );
         svgs.insert(

@@ -1,8 +1,8 @@
+use raylib::prelude::Color as RayColor;
 use std::cell::RefCell;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
-use raylib::prelude::Color as RayColor;
 
 #[derive(Clone, Debug)]
 pub struct FunctionDef {
@@ -29,6 +29,7 @@ pub struct ParsedFile {
     pub lines: Vec<String>,
     pub defs: Vec<FunctionDef>,
     pub calls: Vec<FunctionCall>,
+    pub name_refs: Vec<NameReference>,
     pub spans: Vec<Vec<HighlightSpan>>,
     pub color_cache: RefCell<Option<(u64, Arc<Vec<Vec<(Range<usize>, RayColor)>>>)>>,
 }
@@ -44,7 +45,17 @@ pub struct DefinitionLocation {
     pub file: PathBuf,
     pub module_path: String,
     pub line: usize,
+    #[allow(dead_code)]
     pub col: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct NameReference {
+    pub name: String,
+    pub line: usize,
+    pub col: usize,
+    pub len: usize,
+    pub target: Option<DefinitionLocation>,
 }
 
 #[derive(Clone, Debug)]
