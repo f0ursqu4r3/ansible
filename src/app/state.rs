@@ -17,7 +17,9 @@ use crate::model::{DefinitionLocation, ProjectModel, find_function_span};
 use crate::sidebar::{SidebarAction, SidebarState};
 use crate::theme::Palette;
 
-use super::types::{CallLink, SavedCallOrigin, SavedLayout, SavedViewKind, SavedWindow, ThemeMode};
+use super::types::{
+    CallLink, DepMode, SavedCallOrigin, SavedLayout, SavedViewKind, SavedWindow, ThemeMode,
+};
 
 pub struct AppState {
     pub project: ProjectModel,
@@ -28,6 +30,8 @@ pub struct AppState {
     pub app_palette: Palette,
     pub code_palette: Palette,
     pub theme_mode: ThemeMode,
+    pub dep_mode: DepMode,
+    pub deps_loaded: bool,
     pub(crate) icons: Icons,
     pub(crate) pan: Vector2,
     pub(crate) pan_dragging: bool,
@@ -45,6 +49,7 @@ pub struct AppState {
     pub(crate) last_reload: Instant,
     pub(crate) reload_rx: Option<Receiver<anyhow::Result<ProjectModel>>>,
     pub(crate) reload_inflight: bool,
+    pub(crate) pending_dep_reload: bool,
     pub(crate) sidebar_resizing: bool,
     pub(crate) sidebar_resize_anchor: f32,
     pub(crate) sidebar_resize_start: f32,
@@ -58,6 +63,8 @@ impl AppState {
         app_palette: Palette,
         code_palette: Palette,
         theme_mode: ThemeMode,
+        dep_mode: DepMode,
+        deps_loaded: bool,
     ) -> Self {
         let icons = Icons::load(rl, thread, 16);
         let palette = match theme_mode {
@@ -73,6 +80,8 @@ impl AppState {
             app_palette,
             code_palette,
             theme_mode,
+            dep_mode,
+            deps_loaded,
             icons,
             pan: Vector2::new(0.0, 0.0),
             pan_dragging: false,
@@ -90,6 +99,7 @@ impl AppState {
             last_reload: Instant::now(),
             reload_rx: None,
             reload_inflight: false,
+            pending_dep_reload: false,
             sidebar_resizing: false,
             sidebar_resize_anchor: 0.0,
             sidebar_resize_start: 0.0,
@@ -319,6 +329,27 @@ impl AppState {
         self.set_palette(palette);
     }
 
+    pub fn warm_load_deps(&mut self) {
+        if matches!(self.dep_mode, DepMode::Lazy) && !self.deps_loaded {
+            self.spawn_reload(true);
+        }
+    }
+
+    fn spawn_reload(&mut self, include_deps: bool) {
+        if self.reload_inflight {
+            return;
+        }
+        let root = self.project.root.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.reload_rx = Some(rx);
+        self.reload_inflight = true;
+        self.pending_dep_reload = include_deps;
+        std::thread::spawn(move || {
+            let res = ProjectModel::load(&root, include_deps);
+            let _ = tx.send(res);
+        });
+    }
+
     pub fn handle_sidebar_action(&mut self, action: SidebarAction) {
         match action {
             SidebarAction::OpenFile { path, line } => self.open_file(path, line),
@@ -528,6 +559,10 @@ impl AppState {
                     self.project_dirty = false;
                     self.last_reload = Instant::now();
                     self.reload_rx = None;
+                    if self.pending_dep_reload {
+                        self.deps_loaded = true;
+                    }
+                    self.pending_dep_reload = false;
                     let new_project = res?;
                     self.project = new_project;
                     self.sidebar.mark_tree_dirty();
@@ -550,14 +585,12 @@ impl AppState {
         if Instant::now().duration_since(self.last_reload) < Duration::from_millis(200) {
             return Ok(());
         }
-        let root = self.project.root.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.reload_rx = Some(rx);
-        self.reload_inflight = true;
-        std::thread::spawn(move || {
-            let res = ProjectModel::load(&root);
-            let _ = tx.send(res);
-        });
+        let include_deps = match self.dep_mode {
+            DepMode::Off => false,
+            DepMode::Lazy => self.deps_loaded,
+            DepMode::Eager => true,
+        };
+        self.spawn_reload(include_deps);
         Ok(())
     }
 }

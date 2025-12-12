@@ -74,6 +74,31 @@ pub enum ThemeMode {
     Code,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DepMode {
+    Off,
+    Lazy,
+    Eager,
+}
+
+impl DepMode {
+    pub fn from_env() -> Self {
+        match std::env::var("TRACE_VIEWER_DEPS")
+            .unwrap_or_else(|_| "lazy".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "off" | "0" | "false" => DepMode::Off,
+            "eager" | "on" | "1" | "true" => DepMode::Eager,
+            _ => DepMode::Lazy,
+        }
+    }
+
+    pub fn initial_include_deps(&self) -> bool {
+        matches!(self, DepMode::Eager)
+    }
+}
+
 impl ThemeMode {
     pub fn toggle(self) -> Self {
         match self {

@@ -19,7 +19,7 @@ pub struct ProjectModel {
 }
 
 impl ProjectModel {
-    pub fn load(root: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub fn load(root: impl AsRef<Path>, include_deps: bool) -> anyhow::Result<Self> {
         let root = root.as_ref().to_path_buf();
         let plugins = default_plugins();
         let mut files = Vec::new();
@@ -97,13 +97,15 @@ impl ProjectModel {
             }
         }
 
-        let dep_files = collect_dependency_files(&root)?;
-        for file in dep_files {
-            if parsed.contains_key(&file) {
-                continue;
-            }
-            if let Err(err) = parse_file(file.clone(), &mut parsed, &mut defs) {
-                eprintln!("Skipping dep {}: {}", file.display(), err);
+        if include_deps {
+            let dep_files = collect_dependency_files(&root)?;
+            for file in dep_files {
+                if parsed.contains_key(&file) {
+                    continue;
+                }
+                if let Err(err) = parse_file(file.clone(), &mut parsed, &mut defs) {
+                    eprintln!("Skipping dep {}: {}", file.display(), err);
+                }
             }
         }
 

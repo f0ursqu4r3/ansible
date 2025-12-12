@@ -136,6 +136,7 @@ pub fn default_plugins() -> Vec<Box<dyn LanguagePlugin>> {
               (trait_item name: (type_identifier) @name)
               (impl_item type: (type_identifier) @name)
               (impl_item type: (scoped_type_identifier) @name)
+              (impl_item (declaration_list (function_item name: (identifier) @name)))
             "),
             call_query: q(&rust_lang, "
               (call_expression function: (identifier) @call)

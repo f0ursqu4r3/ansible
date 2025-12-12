@@ -5,4 +5,4 @@ mod types;
 mod util;
 
 pub use state::AppState;
-pub use types::ThemeMode;
+pub use types::{DepMode, ThemeMode};

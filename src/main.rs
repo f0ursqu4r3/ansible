@@ -14,8 +14,7 @@ mod model;
 mod sidebar;
 mod theme;
 
-use app::AppState;
-use app::ThemeMode;
+use app::{AppState, DepMode, ThemeMode};
 use constants::*;
 use theme::{default_palette, load_tmtheme_palette};
 
@@ -76,7 +75,9 @@ fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or(std::env::current_dir()?);
 
-    let project = model::ProjectModel::load(&root)
+    let dep_mode = DepMode::from_env();
+    let initial_include_deps = dep_mode.initial_include_deps();
+    let project = model::ProjectModel::load(&root, initial_include_deps)
         .with_context(|| format!("loading project at {}", root.display()))?;
     let (mut rl, thread) = raylib::init()
         .size(1280, 780)
@@ -100,7 +101,10 @@ fn main() -> Result<()> {
         app_palette,
         code_palette,
         theme_mode,
+        dep_mode,
+        initial_include_deps,
     );
+    app.warm_load_deps();
 
     let (fs_tx, fs_rx) = channel();
     let mut _watcher = notify::recommended_watcher(move |res| {

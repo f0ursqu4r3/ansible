@@ -29,9 +29,15 @@ pub(crate) fn parse_tree_sitter(
             let (node, kind) = def_node_and_kind(cap.node);
             let start = node.start_position();
             let end = node.end_position();
+            let mut module_path = module_for_path(path);
+            if kind == "function_item" {
+                if let Some(ty) = impl_type_name(node, content) {
+                    module_path = ty;
+                }
+            }
             defs.push(FunctionDef {
                 name: text.to_string(),
-                module_path: module_for_path(path),
+                module_path,
                 line: start.row,
                 end_line: end.row,
                 col: start.column,
@@ -48,9 +54,22 @@ pub(crate) fn parse_tree_sitter(
                 None => continue,
             };
             let pos = cap.node.start_position();
+            let mut module_path = module_for_path(path);
+            if let Some(parent) = cap.node.parent() {
+                if parent.kind() == "scoped_identifier" || parent.kind() == "scoped_type_identifier"
+                {
+                    if let Some(full) = node_text(parent, content) {
+                        if let Some(prefix) = scoped_prefix(full) {
+                            module_path = prefix;
+                        } else {
+                            module_path = full.to_string();
+                        }
+                    }
+                }
+            }
             calls.push(FunctionCall {
                 name: text.to_string(),
-                module_path: module_for_path(path),
+                module_path,
                 line: pos.row,
                 col: pos.column,
                 len: text.len(),
@@ -90,6 +109,27 @@ fn def_node_and_kind(node: Node) -> (Node, String) {
 fn node_text<'a>(node: Node<'a>, source: &'a str) -> Option<&'a str> {
     let range = node.byte_range();
     source.get(range)
+}
+
+fn impl_type_name(node: Node, source: &str) -> Option<String> {
+    let mut cur = node;
+    for _ in 0..8 {
+        if let Some(parent) = cur.parent() {
+            if parent.kind() == "impl_item" {
+                if let Some(ty) = parent.child_by_field_name("type") {
+                    return node_text(ty, source).map(|s| s.to_string());
+                }
+            }
+            cur = parent;
+        } else {
+            break;
+        }
+    }
+    None
+}
+
+fn scoped_prefix(text: &str) -> Option<String> {
+    text.rsplitn(2, "::").nth(1).map(|s| s.to_string())
 }
 
 fn module_for_path(path: &Path) -> String {
