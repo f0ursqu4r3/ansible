@@ -99,6 +99,18 @@ impl ContentMetrics {
     }
 }
 
+fn fold_span_for(pf: &ParsedFile, line: usize) -> Option<(usize, usize)> {
+    if let Some(span) = pf.fold_spans.iter().find(|f| f.start == line) {
+        if CodeWindow::span_has_body(span.start, span.end) {
+            return Some((span.start, span.end));
+        }
+    }
+    pf.defs
+        .iter()
+        .find(|d| d.line == line && CodeWindow::span_has_body(d.line, d.end_line))
+        .map(|d| (d.line, d.end_line))
+}
+
 impl CodeWindow {
     pub fn clear_metrics_cache(&self) {
         self.metrics_cache.borrow_mut().take();
@@ -245,23 +257,23 @@ impl CodeWindow {
     }
 
     pub fn toggle_fold(&mut self, pf: &ParsedFile, line: usize) -> bool {
-        // If a fold already exists for this start, flip it.
-        if let Some(fold) = self.folds.iter_mut().find(|f| f.start == line) {
-            fold.collapsed = !fold.collapsed;
-            self.fold_version = self.fold_version.wrapping_add(1);
-            self.clear_metrics_cache();
-            return true;
+        if let Some(idx) = self.folds.iter().position(|f| f.start == line) {
+            if Self::fold_has_body(&self.folds[idx]) {
+                if let Some(fold) = self.folds.get_mut(idx) {
+                    fold.collapsed = !fold.collapsed;
+                    self.fold_version = self.fold_version.wrapping_add(1);
+                    self.clear_metrics_cache();
+                    return true;
+                }
+            } else {
+                self.folds.remove(idx);
+            }
         }
 
-        // Only fold real multi-line ranges.
-        if let Some(def) = pf
-            .defs
-            .iter()
-            .find(|d| d.line == line && d.end_line > d.line)
-        {
+        if let Some((start, end)) = fold_span_for(pf, line) {
             self.folds.push(FoldRegion {
-                start: def.line,
-                end: def.end_line,
+                start,
+                end,
                 collapsed: true,
             });
             self.fold_version = self.fold_version.wrapping_add(1);
@@ -274,24 +286,28 @@ impl CodeWindow {
     pub fn is_fold_collapsed(&self, line: usize) -> bool {
         self.folds
             .iter()
-            .any(|f| f.start == line && f.collapsed)
+            .any(|f| f.start == line && f.collapsed && Self::fold_has_body(f))
     }
 
     pub fn is_foldable_line(&self, pf: &ParsedFile, line: usize) -> bool {
-        self.folds.iter().any(|f| f.start == line)
-            || pf.defs
-                .iter()
-                .any(|d| d.line == line && d.end_line > d.line)
+        self.folds
+            .iter()
+            .any(|f| f.start == line && Self::fold_has_body(f))
+            || fold_span_for(pf, line).is_some()
     }
 
     pub fn collapsed_fold_with_body(&self, line: usize) -> Option<&FoldRegion> {
         self.folds
             .iter()
-            .find(|f| f.start == line && f.collapsed && Self::fold_has_hidden_body(f))
+            .find(|f| f.start == line && f.collapsed && Self::fold_has_body(f))
     }
 
-    fn fold_has_hidden_body(fold: &FoldRegion) -> bool {
+    pub(crate) fn fold_has_body(fold: &FoldRegion) -> bool {
         fold.end.saturating_sub(fold.start) > 1
+    }
+
+    fn span_has_body(start: usize, end: usize) -> bool {
+        end.saturating_sub(start) > 1
     }
 
     fn is_line_hidden(&self, line: usize) -> bool {

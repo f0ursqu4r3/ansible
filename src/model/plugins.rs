@@ -42,6 +42,7 @@ impl LanguagePlugin for FallbackPlugin {
             ParsedComponents {
                 defs: Vec::new(),
                 calls: Vec::new(),
+                folds: Vec::new(),
             },
             default_highlights(lines),
         ))
@@ -53,6 +54,7 @@ pub struct TreeSitterPlugin {
     pub language: Language,
     pub def_query: tree_sitter::Query,
     pub call_query: tree_sitter::Query,
+    pub fold_query: Option<tree_sitter::Query>,
     pub highlight_query: Option<&'static str>,
     pub jsx_highlight_query: Option<&'static str>,
     pub parser: std::sync::Mutex<tree_sitter::Parser>,
@@ -97,6 +99,7 @@ impl LanguagePlugin for TreeSitterPlugin {
             &mut parser,
             &self.def_query,
             &self.call_query,
+            self.fold_query.as_ref(),
         )?;
         let Some(query_src) = self.highlight_query_for(path) else {
             return Ok((parts, default_highlights(lines)));
@@ -116,6 +119,9 @@ pub fn default_plugins() -> Vec<Box<dyn LanguagePlugin>> {
 
     fn q(lang: &Language, src: &'static str) -> tree_sitter::Query {
         tree_sitter::Query::new(lang, src).expect("query compile")
+    }
+    fn opt_q(lang: &Language, src: &'static str) -> Option<tree_sitter::Query> {
+        Some(q(lang, src))
     }
 
     let rust_lang: Language = tree_sitter_rust::LANGUAGE.into();
@@ -153,6 +159,19 @@ pub fn default_plugins() -> Vec<Box<dyn LanguagePlugin>> {
               (function_item return_type: (type_identifier) @call)
               (function_item return_type: (scoped_type_identifier) @call)
             "),
+            fold_query: opt_q(&rust_lang, "
+              (function_item) @fold
+              (struct_item) @fold
+              (enum_item) @fold
+              (trait_item) @fold
+              (type_item) @fold
+              (impl_item) @fold
+              (loop_expression) @fold
+              (for_expression) @fold
+              (while_expression) @fold
+              (if_expression) @fold
+              (match_expression) @fold
+            "),
             highlight_query: Some(tree_sitter_rust::HIGHLIGHTS_QUERY),
             jsx_highlight_query: None,
             parser: parser_for(&rust_lang),
@@ -167,6 +186,15 @@ pub fn default_plugins() -> Vec<Box<dyn LanguagePlugin>> {
             call_query: q(&python_lang, "
               (call function: (identifier) @call)
               (call function: (attribute attribute: (identifier) @call))
+            "),
+            fold_query: opt_q(&python_lang, "
+              (function_definition) @fold
+              (class_definition) @fold
+              (if_statement) @fold
+              (for_statement) @fold
+              (while_statement) @fold
+              (try_statement) @fold
+              (with_statement) @fold
             "),
             highlight_query: Some(tree_sitter_python::HIGHLIGHTS_QUERY),
             jsx_highlight_query: None,
@@ -186,6 +214,18 @@ pub fn default_plugins() -> Vec<Box<dyn LanguagePlugin>> {
               (call_expression function: (member_expression property: (property_identifier) @call))
               (new_expression constructor: (identifier) @call)
               (new_expression constructor: (member_expression property: (property_identifier) @call))
+            "),
+            fold_query: opt_q(&js_lang, "
+              (function_declaration) @fold
+              (method_definition) @fold
+              (class_declaration) @fold
+              (class) @fold
+              (if_statement) @fold
+              (for_statement) @fold
+              (while_statement) @fold
+              (do_statement) @fold
+              (switch_statement) @fold
+              (try_statement) @fold
             "),
             highlight_query: Some(tree_sitter_javascript::HIGHLIGHT_QUERY),
             jsx_highlight_query: Some(tree_sitter_javascript::JSX_HIGHLIGHT_QUERY),
@@ -210,6 +250,22 @@ pub fn default_plugins() -> Vec<Box<dyn LanguagePlugin>> {
               (new_expression constructor: (identifier) @call)
               (new_expression constructor: (member_expression property: (property_identifier) @call))
               (type_annotation (type_identifier) @call)
+            "),
+            fold_query: opt_q(&ts_lang, "
+              (function_declaration) @fold
+              (method_signature) @fold
+              (method_definition) @fold
+              (class_declaration) @fold
+              (abstract_class_declaration) @fold
+              (interface_declaration) @fold
+              (enum_declaration) @fold
+              (type_alias_declaration) @fold
+              (if_statement) @fold
+              (for_statement) @fold
+              (while_statement) @fold
+              (do_statement) @fold
+              (switch_statement) @fold
+              (try_statement) @fold
             "),
             highlight_query: Some(tree_sitter_typescript::HIGHLIGHTS_QUERY),
             jsx_highlight_query: None,

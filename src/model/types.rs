@@ -24,11 +24,18 @@ pub struct FunctionCall {
 }
 
 #[derive(Clone, Debug)]
+pub struct FoldSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, Debug)]
 pub struct ParsedFile {
     pub path: PathBuf,
     pub lines: Vec<String>,
     pub defs: Vec<FunctionDef>,
     pub calls: Vec<FunctionCall>,
+    pub fold_spans: Vec<FoldSpan>,
     pub name_refs: Vec<NameReference>,
     pub spans: Vec<Vec<HighlightSpan>>,
     pub color_cache: RefCell<Option<(u64, Arc<Vec<Vec<(Range<usize>, RayColor)>>>)>>,
@@ -83,4 +90,5 @@ pub enum HighlightKind {
 pub struct ParsedComponents {
     pub defs: Vec<FunctionDef>,
     pub calls: Vec<FunctionCall>,
+    pub folds: Vec<FoldSpan>,
 }

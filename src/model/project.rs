@@ -93,6 +93,7 @@ impl ProjectModel {
                 lines,
                 defs: parts.defs,
                 calls: parts.calls,
+                fold_spans: parts.folds,
                 name_refs,
                 spans,
                 color_cache: std::cell::RefCell::new(None),

@@ -525,6 +525,9 @@ impl AppState {
         let (view_start, view_end) = win.view_range(pf);
         for peer in self.windows.iter().filter(|w| w.file == win.file) {
             for fold in &peer.folds {
+                if !CodeWindow::fold_has_body(fold) {
+                    continue;
+                }
                 if fold.start < view_start || fold.start > view_end {
                     continue;
                 }
@@ -555,6 +558,9 @@ impl AppState {
             let (view_start, view_end) = win.view_range(pf);
             let mut changed = false;
             for fold in folds {
+                if !CodeWindow::fold_has_body(fold) {
+                    continue;
+                }
                 if fold.start < view_start || fold.start > view_end {
                     continue;
                 }

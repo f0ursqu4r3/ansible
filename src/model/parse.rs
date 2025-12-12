@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
-use super::types::{FunctionCall, FunctionDef, ParsedComponents, ParsedFile};
+use super::types::{FoldSpan, FunctionCall, FunctionDef, ParsedComponents, ParsedFile};
 use crate::helpers::module_for_path;
 
 pub(crate) fn parse_tree_sitter(
@@ -11,6 +11,7 @@ pub(crate) fn parse_tree_sitter(
     parser: &mut Parser,
     def_query: &Query,
     call_query: &Query,
+    fold_query: Option<&Query>,
 ) -> anyhow::Result<(ParsedComponents, Tree)> {
     let tree = parser
         .parse(content, None)
@@ -18,6 +19,7 @@ pub(crate) fn parse_tree_sitter(
     let root = tree.root_node();
     let mut defs = Vec::new();
     let mut calls = Vec::new();
+    let mut folds = Vec::new();
     let bytes = content.as_bytes();
     let mut cursor = QueryCursor::new();
     let wildcard_imports = collect_wildcard_imports(root, content);
@@ -87,9 +89,31 @@ pub(crate) fn parse_tree_sitter(
             });
         }
     }
+    if let Some(fold_query) = fold_query {
+        let mut fold_cursor = QueryCursor::new();
+        let mut fold_matches = fold_cursor.matches(fold_query, root, bytes);
+        while let Some(m) = fold_matches.next() {
+            for cap in m.captures.iter() {
+                let node = cap.node;
+                let start = node.start_position();
+                let end = node.end_position();
+                if end.row.saturating_sub(start.row) <= 1 {
+                    continue;
+                }
+                if folds.iter().any(|f: &FoldSpan| f.start == start.row && f.end == end.row) {
+                    continue;
+                }
+                folds.push(FoldSpan {
+                    start: start.row,
+                    end: end.row,
+                });
+            }
+        }
+    }
     defs.sort_by_key(|d| d.line);
     calls.sort_by_key(|c| c.line);
-    Ok((ParsedComponents { defs, calls }, tree))
+    folds.sort_by_key(|f| f.start);
+    Ok((ParsedComponents { defs, calls, folds }, tree))
 }
 
 fn def_node_and_kind(node: Node) -> (Node, String) {

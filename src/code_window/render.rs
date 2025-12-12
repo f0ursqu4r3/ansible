@@ -174,7 +174,7 @@ fn draw_code(
             let segments = colorized_segments_with_calls(file, line_idx, &calls, palette);
             draw_segments(&mut code_scope, font, text_start_x, y, line, &segments);
             if win.collapsed_fold_with_body(line_idx).is_some() {
-                let ellipsis = " ...";
+                let ellipsis = "...";
                 let ellipsis_x = text_start_x + font.measure_width(line, FONT_SIZE, 0.0) + 6.0;
                 font.draw_text_ex(
                     &mut code_scope,
@@ -408,8 +408,7 @@ pub fn hit_test_fold_toggle(
     }
     let metrics = content_metrics(pf, win);
     let top_visible = (win.scroll / LINE_HEIGHT).floor() as usize;
-    let lines_visible =
-        ((metrics.avail_height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
+    let lines_visible = ((metrics.avail_height + LINE_HEIGHT) / LINE_HEIGHT).ceil() as usize;
     let bottom = (top_visible + lines_visible + 1).min(visible_indices.len());
     let y_start = gutter_top - (win.scroll % LINE_HEIGHT);
     let icon_size = (icons.size() as f32).min(LINE_HEIGHT - 2.0);
