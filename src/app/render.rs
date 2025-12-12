@@ -3,6 +3,7 @@ use raylib::prelude::*;
 use crate::code_window;
 use crate::code_window::CodeViewKind;
 use crate::constants::SIDEBAR_WIDTH;
+use crate::point_in_rect;
 use crate::AppFont;
 
 use super::types::{
@@ -30,6 +31,10 @@ impl AppState {
             mouse.x / self.zoom - self.pan.x,
             mouse.y / self.zoom - self.pan.y,
         );
+        let over_window = self
+            .windows
+            .iter()
+            .any(|w| point_in_rect(world_mouse, w.rect_at(Vector2::new(0.0, 0.0))));
         let camera = Camera2D {
             offset: Vector2::new(0.0, 0.0),
             target: Vector2::new(-self.pan.x, -self.pan.y),
@@ -46,21 +51,27 @@ impl AppState {
                     }
                 }
                 if hover_cursor.is_none() {
-                    if self
-                        .call_links
-                        .iter()
-                        .any(|l| l.hovered && min_distance_to_cubic(&l.points, world_mouse) <= 10.0)
-                    {
-                        hover_cursor = Some(MouseCursor::MOUSE_CURSOR_POINTING_HAND);
-                    } else if let Some(pf) = self.project.parsed.get(&self.windows[idx].file) {
-                        if code_window::is_over_call(
-                            font,
-                            pf,
-                            &self.windows[idx],
-                            world_mouse,
-                            &self.project,
-                        ) {
+                    if !over_window {
+                        if self
+                            .call_links
+                            .iter()
+                            .any(|l| l.hovered
+                                && min_distance_to_cubic(&l.points, world_mouse) <= 10.0)
+                        {
                             hover_cursor = Some(MouseCursor::MOUSE_CURSOR_POINTING_HAND);
+                        }
+                    }
+                    if hover_cursor.is_none() {
+                        if let Some(pf) = self.project.parsed.get(&self.windows[idx].file) {
+                            if code_window::is_over_call(
+                                font,
+                                pf,
+                                &self.windows[idx],
+                                world_mouse,
+                                &self.project,
+                            ) {
+                                hover_cursor = Some(MouseCursor::MOUSE_CURSOR_POINTING_HAND);
+                            }
                         }
                     }
                 }
