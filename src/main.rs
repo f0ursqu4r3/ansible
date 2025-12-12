@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
+use notify::{RecursiveMode, Watcher};
 use raylib::prelude::*;
 use std::env;
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
 
 mod app;
 mod code_window;
@@ -86,7 +88,28 @@ fn main() -> Result<()> {
     let palette = load_tmtheme_palette().unwrap_or_else(default_palette);
     let mut app = AppState::new(project, &mut rl, &thread, palette);
 
+    let (fs_tx, fs_rx) = channel();
+    let mut _watcher = notify::recommended_watcher(move |res| {
+        let _ = fs_tx.send(res);
+    })?;
+    _watcher.watch(&root, RecursiveMode::Recursive)?;
+
     while !rl.window_should_close() {
+        while let Ok(event) = fs_rx.try_recv() {
+            if let Ok(evt) = event {
+                use notify::event::EventKind;
+                match evt.kind {
+                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) | EventKind::Any => {
+                        app.mark_project_dirty();
+                    }
+                    _ => {}
+                }
+            } else {
+                app.mark_project_dirty();
+            }
+        }
+        app.reload_project_if_needed()?;
+
         let mouse = rl.get_mouse_position();
         let wheel = rl.get_mouse_wheel_move();
         let left_pressed = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);

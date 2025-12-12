@@ -58,6 +58,7 @@ impl ProjectModel {
                 defs: parts.defs,
                 calls: parts.calls,
                 spans,
+                color_cache: std::cell::RefCell::new(None),
             };
             for def in &pf.defs {
                 defs.entry(def.name.clone())

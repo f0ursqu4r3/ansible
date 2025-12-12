@@ -1,4 +1,7 @@
+use std::cell::RefCell;
+use std::ops::Range;
 use std::path::PathBuf;
+use raylib::prelude::Color as RayColor;
 
 #[derive(Clone, Debug)]
 pub struct FunctionDef {
@@ -26,6 +29,7 @@ pub struct ParsedFile {
     pub defs: Vec<FunctionDef>,
     pub calls: Vec<FunctionCall>,
     pub spans: Vec<Vec<HighlightSpan>>,
+    pub color_cache: RefCell<Option<(u64, Vec<Vec<(Range<usize>, RayColor)>>)>>,
 }
 
 impl ParsedFile {

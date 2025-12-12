@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::Instant;
+use std::time::Duration;
 
 use raylib::prelude::*;
 use serde_json;
@@ -36,6 +37,8 @@ pub struct AppState {
     pub(crate) last_click_window: Option<usize>,
     pub(crate) call_links: Vec<CallLink>,
     pub(crate) last_link_cycle: Option<(Vector2, usize)>, // click pos, index in group
+    pub(crate) project_dirty: bool,
+    pub(crate) last_reload: Instant,
 }
 
 impl AppState {
@@ -65,6 +68,8 @@ impl AppState {
             last_click_window: None,
             call_links: Vec::new(),
             last_link_cycle: None,
+            project_dirty: false,
+            last_reload: Instant::now(),
         };
         state.load_layout();
         if state.windows.is_empty() {
@@ -261,6 +266,13 @@ impl AppState {
         self.windows.push(win);
     }
 
+    pub fn set_palette(&mut self, palette: Palette) {
+        self.palette = palette;
+        for pf in self.project.parsed.values() {
+            pf.color_cache.borrow_mut().take();
+        }
+    }
+
     pub fn handle_sidebar_action(&mut self, action: SidebarAction) {
         match action {
             SidebarAction::OpenFile { path, line } => self.open_file(path, line),
@@ -384,11 +396,20 @@ impl AppState {
     }
 
     pub(crate) fn refresh_window_metadata(&self, win: &mut CodeWindow) {
-        if let Some(pf) = self.project.parsed.get(&win.file) {
+        Self::refresh_window_metadata_with_project(&self.project, win);
+    }
+
+    pub(crate) fn refresh_window_metadata_with_project(
+        project: &ProjectModel,
+        win: &mut CodeWindow,
+    ) {
+        if let Some(pf) = project.parsed.get(&win.file) {
             win.update_refs(pf);
+            win.clear_metrics_cache();
         } else {
             win.def_refs.clear();
             win.call_refs.clear();
+            win.clear_metrics_cache();
         }
     }
 
@@ -434,5 +455,34 @@ impl AppState {
             width: (max_x - min_x) + padding * 2.0,
             height: (max_y - min_y) + padding * 2.0,
         })
+    }
+
+    pub fn mark_project_dirty(&mut self) {
+        self.project_dirty = true;
+    }
+
+    pub fn reload_project_if_needed(&mut self) -> anyhow::Result<()> {
+        if !self.project_dirty {
+            return Ok(());
+        }
+        let now = Instant::now();
+        if now.duration_since(self.last_reload) < Duration::from_millis(200) {
+            return Ok(());
+        }
+        let new_project = ProjectModel::load(&self.project.root)?;
+        self.project = new_project;
+        self.sidebar.mark_tree_dirty();
+        {
+            let project_ref = &self.project;
+            for win in &mut self.windows {
+                code_window::clamp_window_scroll(project_ref, win);
+            }
+        }
+        for win in &mut self.windows {
+            Self::refresh_window_metadata_with_project(&self.project, win);
+        }
+        self.project_dirty = false;
+        self.last_reload = now;
+        Ok(())
     }
 }

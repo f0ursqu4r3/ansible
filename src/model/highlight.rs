@@ -4,6 +4,8 @@ use tree_sitter::{Language, Point, Query, QueryCursor, StreamingIterator, Tree};
 use crate::theme::Palette;
 
 use super::types::{FunctionCall, HighlightKind, HighlightSpan, ParsedFile};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 #[derive(Clone, Debug)]
@@ -232,19 +234,34 @@ pub fn colorized_segments_with_calls(
         return Vec::new();
     }
     let line = &pf.lines[line_idx];
-    let mut spans: Vec<(usize, usize, RayColor)> = pf
-        .spans
+    let palette_hash = palette_hash(palette);
+    let base_segments = {
+        let mut cache = pf.color_cache.borrow_mut();
+        match cache.as_ref() {
+            Some((h, segs)) if *h == palette_hash => segs.clone(),
+            _ => {
+                let segs: Vec<Vec<(Range<usize>, RayColor)>> = pf
+                    .spans
+                    .iter()
+                    .map(|line_spans| {
+                        line_spans
+                            .iter()
+                            .map(|s| (s.start..s.end, color_for_kind(s.kind, palette)))
+                            .collect()
+                    })
+                    .collect();
+                *cache = Some((palette_hash, segs.clone()));
+                segs
+            }
+        }
+    };
+
+    let mut spans: Vec<(usize, usize, RayColor)> = base_segments
         .get(line_idx)
         .cloned()
-        .unwrap_or_else(|| {
-            vec![HighlightSpan {
-                start: 0,
-                end: line.len(),
-                kind: HighlightKind::Plain,
-            }]
-        })
+        .unwrap_or_else(|| vec![(0..line.len(), color_for_kind(HighlightKind::Plain, palette))])
         .into_iter()
-        .map(|s| (s.start, s.end, color_for_kind(s.kind, palette)))
+        .map(|(r, c)| (r.start, r.end, c))
         .collect();
 
     let mut call_ranges: Vec<(usize, usize)> = calls.iter().map(|c| (c.col, c.len)).collect();
@@ -286,4 +303,39 @@ pub fn colorized_segments_with_calls(
     }
 
     segments
+}
+
+fn palette_hash(palette: &Palette) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    palette_hash_part(&mut hasher, palette.bg);
+    palette_hash_part(&mut hasher, palette.sidebar);
+    palette_hash_part(&mut hasher, palette.window_top);
+    palette_hash_part(&mut hasher, palette.window);
+    palette_hash_part(&mut hasher, palette.title);
+    palette_hash_part(&mut hasher, palette.text);
+    palette_hash_part(&mut hasher, palette.comment);
+    palette_hash_part(&mut hasher, palette.string);
+    palette_hash_part(&mut hasher, palette.keyword);
+    palette_hash_part(&mut hasher, palette.r#type);
+    palette_hash_part(&mut hasher, palette.constant);
+    palette_hash_part(&mut hasher, palette.number);
+    palette_hash_part(&mut hasher, palette.property);
+    palette_hash_part(&mut hasher, palette.operator);
+    palette_hash_part(&mut hasher, palette.builtin);
+    palette_hash_part(&mut hasher, palette.call);
+    palette_hash_part(&mut hasher, palette.line_num);
+    palette_hash_part(&mut hasher, palette.close);
+    palette_hash_part(&mut hasher, palette.project);
+    palette_hash_part(&mut hasher, palette.sidebar_text);
+    palette_hash_part(&mut hasher, palette.sidebar_highlight);
+    palette_hash_part(&mut hasher, palette.search_bg);
+    palette_hash_part(&mut hasher, palette.breadcrumb);
+    hasher.finish()
+}
+
+fn palette_hash_part(hasher: &mut DefaultHasher, c: RayColor) {
+    c.r.hash(hasher);
+    c.g.hash(hasher);
+    c.b.hash(hasher);
+    c.a.hash(hasher);
 }
