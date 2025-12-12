@@ -50,6 +50,7 @@ pub struct AppState {
     pub(crate) reload_rx: Option<Receiver<anyhow::Result<ProjectModel>>>,
     pub(crate) reload_inflight: bool,
     pub(crate) pending_dep_reload: bool,
+    pub(crate) pending_project_root: Option<PathBuf>,
     pub(crate) sidebar_resizing: bool,
     pub(crate) sidebar_resize_anchor: f32,
     pub(crate) sidebar_resize_start: f32,
@@ -100,6 +101,7 @@ impl AppState {
             reload_rx: None,
             reload_inflight: false,
             pending_dep_reload: false,
+            pending_project_root: None,
             sidebar_resizing: false,
             sidebar_resize_anchor: 0.0,
             sidebar_resize_start: 0.0,
@@ -367,6 +369,11 @@ impl AppState {
                 self.theme_mode = self.theme_mode.toggle();
                 self.apply_theme_mode();
             }
+            SidebarAction::OpenFolder => {
+                if let Some(path) = pick_project_root(&self.project.root) {
+                    self.pending_project_root = Some(path);
+                }
+            }
         }
     }
 
@@ -593,4 +600,16 @@ impl AppState {
         self.spawn_reload(include_deps);
         Ok(())
     }
+
+    pub fn take_pending_project_root(&mut self) -> Option<PathBuf> {
+        self.pending_project_root.take()
+    }
+}
+
+fn pick_project_root(current: &PathBuf) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new();
+    if current.exists() {
+        dialog = dialog.set_directory(current);
+    }
+    dialog.pick_folder()
 }

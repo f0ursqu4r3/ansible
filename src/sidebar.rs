@@ -26,6 +26,7 @@ pub enum SidebarAction {
     ToggleDir,
     ToggleCollapse,
     ToggleTheme,
+    OpenFolder,
 }
 
 pub struct SidebarState {
@@ -124,6 +125,16 @@ impl SidebarState {
             y: toggle.y,
             width: 44.0,
             height: toggle.height,
+        }
+    }
+
+    fn open_folder_rect(&self) -> Rectangle {
+        let theme = self.theme_rect();
+        Rectangle {
+            x: (theme.x - 124.0).max(4.0),
+            y: theme.y,
+            width: 116.0,
+            height: theme.height,
         }
     }
 
@@ -305,6 +316,10 @@ impl SidebarState {
         if point_in_rect(mouse, theme_rect) {
             return Some(SidebarAction::ToggleTheme);
         }
+        let open_rect = self.open_folder_rect();
+        if point_in_rect(mouse, open_rect) {
+            return Some(SidebarAction::OpenFolder);
+        }
         let query = self.search_query.to_lowercase();
         self.ensure_entries(project);
         let filtered: Vec<TreeEntry> = self
@@ -410,6 +425,38 @@ impl SidebarState {
             d,
             theme_label,
             Vector2::new(theme_rect.x + 4.0, theme_rect.y + 1.0),
+            FONT_SIZE - 2.0,
+            0.0,
+            palette.text,
+        );
+        let open_rect = self.open_folder_rect();
+        d.draw_rectangle(
+            open_rect.x as i32,
+            open_rect.y as i32,
+            open_rect.width as i32,
+            open_rect.height as i32,
+            palette.title,
+        );
+        if point_in_rect(mouse, open_rect) {
+            d.draw_rectangle_lines(
+                open_rect.x as i32,
+                open_rect.y as i32,
+                open_rect.width as i32,
+                open_rect.height as i32,
+                palette.project,
+            );
+        }
+        let icon_y = open_rect.y + (open_rect.height - self.icons.size() as f32) * 0.5;
+        self.icons.render(
+            d,
+            Icon::FolderOpen,
+            Vector2::new(open_rect.x + 4.0, icon_y),
+            palette.text,
+        );
+        font.draw_text_ex(
+            d,
+            "Open Folder",
+            Vector2::new(open_rect.x + self.icons.size() as f32 + 8.0, open_rect.y + 1.0),
             FONT_SIZE - 2.0,
             0.0,
             palette.text,

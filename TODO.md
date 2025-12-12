@@ -1,9 +1,5 @@
 # TODO List
 
-## Bug Fixes
-
-[ ] fix jump target resolution for external crate functions (e.g., `resvg::render()` currently jumps to src/icons.rs).
-
 ## Features to Implement
 
 [ ] add Open Folder button to the file explorer so users can open a folder directly from the explorer view
@@ -16,4 +12,5 @@
 
 ## Future Enhancements
 
+[ ] fix jump target resolution for external crate functions
 [ ] implement a plugin system for extending application functionality

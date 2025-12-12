@@ -70,7 +70,7 @@ impl AppFont {
 }
 
 fn main() -> Result<()> {
-    let root = std::env::args()
+    let mut root = std::env::args()
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or(std::env::current_dir()?);
@@ -165,6 +165,43 @@ fn main() -> Result<()> {
             rl.get_screen_height() as f32,
             meta_close_pressed,
         );
+
+        if let Some(new_root) = app.take_pending_project_root() {
+            let include_deps = app.dep_mode.initial_include_deps();
+            match model::ProjectModel::load(&new_root, include_deps) {
+                Ok(project) => {
+                    let app_palette = app.app_palette;
+                    let code_palette = app.code_palette;
+                    let theme_mode = app.theme_mode;
+                    let dep_mode = app.dep_mode;
+                    if let Err(err) = _watcher.unwatch(&root) {
+                        eprintln!("Watcher unwatch {}: {}", root.display(), err);
+                    }
+                    if let Err(err) = _watcher.watch(&new_root, RecursiveMode::Recursive) {
+                        eprintln!("Watcher watch {}: {}", new_root.display(), err);
+                        // Try to restore the previous watch so hot reload keeps working.
+                        let _ = _watcher.watch(&root, RecursiveMode::Recursive);
+                    } else {
+                        root = new_root.clone();
+                        let mut new_app = AppState::new(
+                            project,
+                            &mut rl,
+                            &thread,
+                            app_palette,
+                            code_palette,
+                            theme_mode,
+                            dep_mode,
+                            include_deps,
+                        );
+                        new_app.warm_load_deps();
+                        app = new_app;
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Failed to load project {}: {}", new_root.display(), err);
+                }
+            }
+        }
 
         let mut d = rl.begin_drawing(&thread);
         app.draw(&mut d, &font, mouse);

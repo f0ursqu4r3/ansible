@@ -10,6 +10,26 @@ use super::rust_symbols::analyze_rust_symbols;
 use super::types::{DefinitionLocation, ParsedFile};
 
 const MAX_DEP_FILES: usize = 800;
+const IGNORED_DIR_NAMES: &[&str] = &[
+    ".git",
+    "target",
+    "data",
+    ".venv",
+    "venv",
+    "env",
+    ".env",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".nox",
+    ".tox",
+    "node_modules",
+    "build",
+    "dist",
+    ".idea",
+    ".vscode",
+];
 
 pub struct ProjectModel {
     pub root: PathBuf,
@@ -25,7 +45,7 @@ impl ProjectModel {
         let mut files = Vec::new();
         for entry in WalkDir::new(&root).into_iter().filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
-            !(name.starts_with(".git") || name == "target" || name == "data")
+            !IGNORED_DIR_NAMES.iter().any(|n| *n == name)
         }) {
             let entry = entry?;
             if entry.file_type().is_file() && plugins.iter().any(|p| p.matches(entry.path())) {
