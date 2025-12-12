@@ -1,5 +1,21 @@
 {
-  "windows": [],
+  "windows": [
+    {
+      "file": "src\\app\\input.rs",
+      "view_kind": null,
+      "position": [
+        284.0,
+        40.0
+      ],
+      "size": [
+        720.0,
+        460.0
+      ],
+      "scroll": 7061.6,
+      "scroll_x": 164.8,
+      "link_from": null
+    }
+  ],
   "sidebar_scroll": 0.0,
   "sidebar_collapsed": [
     "target",

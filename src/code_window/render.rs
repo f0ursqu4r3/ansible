@@ -176,15 +176,20 @@ fn draw_code(
     }
 
     let gutter_width = CODE_X_OFFSET - 4.0;
+    let gutter_height = (content_rect.height - BREADCRUMB_HEIGHT).max(0.0);
     scoped.draw_rectangle(
         content_rect.x as i32,
         start_y as i32,
         gutter_width as i32,
-        (metrics.avail_height + LINE_HEIGHT) as i32,
+        gutter_height as i32,
         palette.window,
     );
+
     let mut y_nums = start_y - (win.scroll % LINE_HEIGHT);
     for idx in top_visible..bottom {
+        if y_nums > start_y + text_area_height {
+            break;
+        }
         let line_idx = view_start + idx;
         font.draw_text_ex(
             &mut scoped,
